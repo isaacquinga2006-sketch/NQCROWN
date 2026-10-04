@@ -626,6 +626,7 @@
                 <li>Te enviamos un correo cuando tu pedido esté listo.</li>
                 <li>Vas al local, das tu número de pedido y tu nombre.</li>
                 <li>Pagas ahí al retirar. No pagas nada en línea.</li>
+                <li><b>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</b></li>
               </ul>
               <label class="check check--box" for="f_acepto" data-label="Confirmación de retiro"><input type="checkbox" name="acepto" id="f_acepto" aria-describedby="m_acepto"> Entiendo que debo retirar y pagar el pedido en el local.</label>
               <div class="field" data-f="acepto"><span class="msg" id="m_acepto"></span></div>
@@ -709,7 +710,7 @@
           <div class="row"><dt>Pago</dt><dd>Al retirar, en el local</dd></div>
           <div class="row row--total"><dt>Total a pagar</dt><dd>${money(o.total)}</dd></div>
         </dl>
-        <p class="notice notice--small">${ICON.store} Lleva tu número de pedido <b>#${o.num}</b> al local.</p>
+        <p class="notice notice--small">${ICON.store} Lleva tu número de pedido <b>#${o.num}</b> al local. Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</p>
       </section>
       <div class="actions">
         <a class="btn btn--cafe" href="#/catalogo">Seguir comprando</a>
@@ -747,7 +748,7 @@
         <dt>¿Se guarda mi carrito?</dt><dd>Sí, en este navegador. Si cierras la página, tu carrito y tus favoritas siguen ahí.</dd>
       </dl>`],
     retiro: ["Retiro en el local", `<p>No hacemos envíos. Reservas en línea y retiras en <b>${esc(localTexto())}</b>.</p>
-      <ul><li><b>Horario:</b> ${esc(STORE.local.horario)}.</li><li>Te avisamos por correo cuando tu pedido está listo.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li></ul>`],
+      <ul><li><b>Horario:</b> ${esc(STORE.local.horario)}.</li><li>Te avisamos por correo cuando tu pedido está listo.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><b>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</b></li></ul>`],
     devoluciones: ["Devoluciones", "<p>Tienes 15 días desde que retiras tu pedido para devolverlo en el local. La gorra debe estar sin usar y con sus etiquetas.</p>"],
     contacto: ["Contacto", "<p>Correo: <b>hola@nqcrown.com</b></p><p>Horario: lunes a sábado, de 9:00 a 18:00.</p>"],
     accesibilidad: ["Accesibilidad", `<p>Queremos que todas las personas puedan comprar en NQ Crown.</p>
