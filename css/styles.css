@@ -437,3 +437,37 @@ kbd { font: 600 13px var(--cuerpo); border: 1px solid var(--borde-campo); border
   .panel, .filters { top: 16px; }
 }
 .line__prod a, .link { display: inline-block; min-height: 24px; }
+
+/* ---------- Reseñas, Mis pedidos y avisos de la base de datos ---------- */
+.reviews { margin-top: 48px; max-width: 760px; }
+.review-form { padding-bottom: 22px; }
+.review-form h3 { font: 600 18px var(--cuerpo); margin-bottom: 14px; }
+.rate { border: 0; padding: 0; margin: 0 0 14px; }
+.rate legend { font-weight: 600; font-size: 14px; margin-bottom: 8px; padding: 0; }
+.rate__opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.rate__opt { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border: 1.5px solid var(--beige); border-radius: 20px; background: var(--beige-claro); color: var(--morado); cursor: pointer; }
+.rate__opt input { width: 18px; height: 18px; accent-color: var(--morado); margin: 0; }
+.rate__opt:has(input:checked) { background: var(--morado); border-color: var(--morado); color: var(--blanco); }
+.rate__opt:has(input:focus-visible) { outline: 3px solid var(--morado); outline-offset: 2px; }
+.field.bad .rate__opt { border-color: var(--rojo); }
+.field textarea { width: 100%; min-height: 88px; border-radius: 6px; border: 1.5px solid var(--borde-campo); background: var(--blanco); padding: 10px 14px; font: inherit; resize: vertical; }
+.field textarea:focus { border-color: var(--cafe); outline: none; box-shadow: 0 0 0 3px rgba(107, 63, 160, .2); }
+.revlist { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 12px; }
+.rev { background: var(--blanco); border: 1.5px solid var(--beige-claro); border-radius: var(--radio); padding: 14px 18px; }
+.rev__head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.rev__head .stars { margin: 0; }
+.rev__head small { color: var(--suave); }
+.rev p { margin: 8px 0 0; }
+.rev .link { margin-top: 8px; min-height: 24px; }
+.errsum--ok { background: #e8f3ed; border-color: var(--verde); }
+.errsum--ok h2 { color: var(--verde); }
+.errsum--ok:focus { outline-color: var(--verde); }
+.badge--reservado { background: #efe7f8; color: var(--morado); }
+.badge--retirado { background: #e8f3ed; color: var(--verde); }
+.badge--cancelado { background: #fdecea; color: var(--rojo); }
+.timeline { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0; padding: 0; font-size: 13px; color: var(--suave); }
+.timeline__item { display: flex; align-items: center; gap: 6px; }
+.timeline__item::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--morado); }
+.timeline__item--retirado::before { background: var(--verde); }
+.timeline__item--cancelado::before { background: var(--rojo); }
+.btn--sm { height: 40px; padding: 0 16px; font-size: 14px; }

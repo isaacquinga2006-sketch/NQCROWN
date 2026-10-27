@@ -1,9 +1,11 @@
 /* NQ Crown · tienda de una sola página con rutas por hash (#/catalogo, #/producto/3 …).
-   Todo se guarda en el navegador (localStorage); no hay servidor ni pagos reales. */
+   Catálogo, cuentas, favoritos, carrito, reservas y reseñas viven en Supabase (js/db.js).
+   El invitado guarda su carrito en el navegador. No hay pagos en línea. */
 (() => {
   "use strict";
 
-  const PRODUCTS = window.PRODUCTS;
+  const DB = window.DB;
+  let PRODUCTS = window.PRODUCTS; // se reemplaza por el catálogo de la base al iniciar
   const STORE = window.STORE;
   const byId = id => PRODUCTS.find(p => p.id === Number(id));
   const $ = (s, el = document) => el.querySelector(s);
@@ -16,6 +18,7 @@
   const fmtDate = d => d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
   const fmtShort = d => d.toLocaleDateString("es", { day: "2-digit", month: "2-digit", year: "numeric" });
   const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+  const isoDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const plural = (n, s, p = s + "s") => `${n} ${n === 1 ? s : p}`;
   const ICON = {
     heart: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>',
@@ -30,15 +33,22 @@
   const load = (k, def) => { try { const v = localStorage.getItem("nqc_" + k); return v ? JSON.parse(v) : def; } catch { return def; } };
   const save = (k, v) => { try { localStorage.setItem("nqc_" + k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } };
 
+  // En el navegador solo queda lo del invitado; con sesión, carrito y favoritas vienen de la base.
   const state = {
     cart: load("cart", {}),          // { idProducto: cantidad }
-    favs: load("favs", []),          // [idProducto]
-    user: load("user", null),        // { nombre, email } (sin contraseña)
+    favs: [],                        // [idProducto], solo con sesión
+    user: null,                      // { id, nombre, apellido, email, telefono }
     guest: load("guest", false),     // compra como invitado
-    coupon: load("coupon", ""),
-    orders: load("orders", [])
+    coupon: (c => c && c.pct ? c : null)(load("coupon", null)), // { code, pct } validado en la base
+    lastOrder: load("lastOrder", null), // última reserva (para la confirmación del invitado)
+    ratings: {}                      // { idProducto: { promedio, total } }
   };
-  const persist = () => Object.entries(state).forEach(([k, v]) => save(k, v));
+  const persist = () => {
+    save("cart", state.user ? {} : state.cart);
+    save("guest", state.guest); save("coupon", state.coupon); save("lastOrder", state.lastOrder);
+  };
+  // Cualquier error de la base se muestra en un aviso (nunca falla en silencio)
+  const dbError = (e, msg = "No pudimos guardar el cambio. Revisa tu conexión e intenta de nuevo.") => { console.error(e); toast(msg); };
 
   const cartItems = () => Object.entries(state.cart)
     .map(([id, qty]) => ({ p: byId(id), qty }))
@@ -47,11 +57,27 @@
 
   function totals() {
     const subtotal = cartItems().reduce((s, i) => s + i.p.precio * i.qty, 0);
-    const rate = STORE.cupones[state.coupon] || 0;
+    const rate = state.coupon ? state.coupon.pct / 100 : 0;
     const descuento = +(subtotal * rate).toFixed(2);
     return { subtotal, descuento, total: +(subtotal - descuento).toFixed(2) };
   }
   const localTexto = () => [STORE.local.nombre, STORE.local.direccion].filter(Boolean).join(" · ");
+  const limiteTexto = iso => fmtDate(new Date(iso + "T12:00:00")); // «viernes, 30 de octubre»
+
+  // Datos de la cuenta: perfil, favoritas y carrito. El carrito del invitado se suma al de la cuenta.
+  async function loadUser(session) {
+    if (!session) { state.user = null; state.favs = []; return; }
+    const u = session.user;
+    const [perfil, favs, cart] = await Promise.all([DB.perfil(u.id), DB.favoritos(), DB.carrito()]);
+    state.user = { id: u.id, email: u.email, nombre: perfil?.nombre || u.email.split("@")[0], apellido: perfil?.apellido || "", telefono: perfil?.telefono || "" };
+    state.favs = favs;
+    const local = load("cart", {});
+    Object.entries(local).forEach(([id, q]) => { cart[id] = Math.min(10, (cart[id] || 0) + q); });
+    if (Object.keys(local).length) await DB.guardarCarrito(u.id, cart);
+    state.cart = cart;
+    state.guest = false;
+    persist();
+  }
 
   /* ---------- Respuesta del sistema (microinteracciones) ---------- */
   let toastTimer, toastAction = null;
@@ -78,7 +104,7 @@
     const p = byId(id);
     const before = state.cart[id] || 0;
     state.cart[id] = Math.min(10, before + qty);
-    persist(); updateHeader();
+    persist(); updateHeader(); syncItem(id);
     const b = $("#cartBtn"); b.classList.remove("bump"); void b.offsetWidth; b.classList.add("bump");
     if (btn) { // el botón confirma la acción por un momento
       const old = btn.innerHTML;
@@ -90,20 +116,35 @@
   }
   function setQty(id, qty) {
     if (qty <= 0) delete state.cart[id]; else state.cart[id] = Math.min(10, qty);
-    persist(); updateHeader();
+    persist(); updateHeader(); syncItem(id);
   }
+  // Con sesión, cada cambio del carrito se guarda en la base
+  const syncItem = id => state.user && DB.guardarItem(state.user.id, Number(id), state.cart[id] || 0).catch(e => dbError(e));
   function removeItem(id) {
     const p = byId(id), qty = state.cart[id];
     setQty(id, 0); viewCart();
     toast(`Quitaste ${p.nombre} del carrito`, { label: "Deshacer", run: () => { setQty(id, qty); viewCart(); announce(`${p.nombre} volvió al carrito`); } });
   }
+  // Las favoritas se guardan en la cuenta: sin sesión se pide ingresar (no se pierden en otro dispositivo).
   function toggleFav(id) {
     id = Number(id);
+    if (!state.user) {
+      toast("Ingresa a tu cuenta para guardar favoritas", { label: "Ingresar", run: () => go("#/ingresar?next=" + encodeURIComponent(location.hash.replace(/^#\/?/, "") || "catalogo")) });
+      return null;
+    }
     const on = !state.favs.includes(id);
     state.favs = on ? [...state.favs, id] : state.favs.filter(f => f !== id);
-    persist();
     toast(on ? `${byId(id).nombre} se guardó en tus favoritas` : `${byId(id).nombre} se quitó de tus favoritas`);
+    DB.marcarFavorito(state.user.id, id, on).catch(e => {
+      state.favs = on ? state.favs.filter(f => f !== id) : [...state.favs, id];
+      paintFav(id, !on);
+      dbError(e, "No pudimos guardar tu favorita. Intenta de nuevo.");
+    });
     return on;
+  }
+  function paintFav(id, on) {
+    const p = byId(id);
+    $$(`.fav[data-id="${id}"]`).forEach(b => { b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); b.setAttribute("aria-label", favLabel(p, on)); b.title = on ? "Quitar de favoritas" : "Guardar en favoritas"; });
   }
   const favLabel = (p, on) => on ? `Quitar ${p.nombre} de favoritas` : `Guardar ${p.nombre} en favoritas`;
 
@@ -126,7 +167,12 @@
     confirmacion: viewConfirm,
     pedidos: viewOrders,
     info: viewInfo,
-    salir: () => { state.user = null; state.guest = false; persist(); toast("Cerraste sesión"); go("#/catalogo"); }
+    "nueva-clave": viewNewPassword,
+    salir: async () => {
+      try { await DB.salir(); } catch (e) { return dbError(e, "No pudimos cerrar tu sesión. Intenta de nuevo."); }
+      state.user = null; state.favs = []; state.cart = {}; state.guest = false; persist();
+      toast("Cerraste sesión"); go("#/catalogo");
+    }
   };
 
   function render() {
@@ -142,8 +188,8 @@
     $("#cartCount").textContent = n;
     $("#cartSr").textContent = ", " + plural(n, "producto");
     const acc = $("#accountLink");
-    if (state.user) { acc.textContent = "Hola, " + state.user.nombre.split(" ")[0]; acc.href = "#/pedidos"; }
-    else { acc.textContent = "Ingresar"; acc.href = "#/ingresar"; }
+    if (state.user) { acc.textContent = "Hola, " + state.user.nombre.split(" ")[0]; acc.href = "#/pedidos"; acc.setAttribute("aria-label", `Hola, ${state.user.nombre.split(" ")[0]}: ver mis pedidos y mi cuenta`); }
+    else { acc.textContent = "Ingresar"; acc.href = "#/ingresar"; acc.removeAttribute("aria-label"); }
     const navKey = r.name === "catalogo" && r.q.get("f") === "fav" ? "favoritos" : r.name;
     $$(".mainnav a").forEach(a => {
       const on = a.dataset.nav === navKey;
@@ -191,7 +237,7 @@
   function summaryRows(t) {
     return `<dl class="sum">
       <div class="row"><dt>Subtotal</dt><dd>${money(t.subtotal)}</dd></div>
-      ${t.descuento ? `<div class="row row--desc"><dt>Descuento (${esc(state.coupon)})</dt><dd>−${money(t.descuento)}</dd></div>` : ""}
+      ${t.descuento ? `<div class="row row--desc"><dt>Descuento (${esc(state.coupon.code)}, ${state.coupon.pct} %)</dt><dd>−${money(t.descuento)}</dd></div>` : ""}
       <div class="row row--total"><dt>Total a pagar en el local</dt><dd>${money(t.total)}</dd></div>
     </dl>`;
   }
@@ -276,6 +322,8 @@
         ${Array.from({ length: pages }, (_, i) => `<button type="button" class="${i + 1 === page ? "on" : ""}" data-action="page" data-p="${i + 1}" aria-label="Página ${i + 1}" ${i + 1 === page ? 'aria-current="page"' : ""}>${i + 1}</button>`).join("")}
         <button type="button" data-action="page" data-p="${page + 1}" ${page === pages ? "disabled" : ""} aria-label="Página siguiente">›</button>
       </nav>`;
+    } else if (f === "fav" && !state.user) {
+      body = `<div class="empty"><h3>Ingresa para ver tus favoritas</h3><p>Tus favoritas se guardan en tu cuenta, así las ves en cualquier dispositivo.</p><a class="btn btn--cafe" href="#/ingresar?next=${encodeURIComponent("catalogo?f=fav")}">Ingresar</a></div>`;
     } else if (f === "fav" && !term && !nSel) {
       body = `<div class="empty"><h3>Aún no tienes favoritas</h3><p>Toca el corazón ${ICON.heart} de una gorra para guardarla aquí.</p><button type="button" class="btn btn--cafe" data-action="filter" data-f="all">Ver todas las gorras</button></div>`;
     } else {
@@ -346,6 +394,73 @@
   ];
   const viewStyle = v => `--z:${v.z};--ox:${v.ox};--oy:${v.oy}`;
 
+  /* ---------- Reseñas (en la base) ---------- */
+  const starIcons = n => "★".repeat(Math.round(n)) + "☆".repeat(5 - Math.round(n));
+  function starsLine(id) {
+    const r = state.ratings[id];
+    if (!r || !r.total) return `<span aria-hidden="true">☆☆☆☆☆</span> Sin reseñas todavía · <a class="link" href="#reviews" data-action="toReviews">Sé el primero en opinar</a>`;
+    return `<span aria-hidden="true">${starIcons(r.promedio)}</span><span class="sr-only">Calificación: ${r.promedio} de 5 estrellas,</span> ${r.promedio.toFixed(1)} · <a class="link" href="#reviews" data-action="toReviews">${plural(r.total, "reseña")}</a>`;
+  }
+
+  async function loadReviews(p, announceIt = false) {
+    let list;
+    try { list = await DB.resenas(p.id); }
+    catch (e) { console.error(e); if ($("#reviews")) $("#reviews").innerHTML = `<p class="hint err">No pudimos cargar las reseñas. <button type="button" class="link" data-action="retryReviews">Reintentar</button></p>`; app.retryReviews = () => loadReviews(p); return; }
+    const box = $("#reviews");
+    if (!box || parseHash().arg !== String(p.id)) return; // el usuario ya cambió de pantalla
+    const total = list.length, promedio = total ? Math.round(list.reduce((s, r) => s + r.calificacion, 0) / total * 10) / 10 : 0;
+    state.ratings[p.id] = { promedio, total };
+    $("#starsLine").innerHTML = starsLine(p.id);
+    const mine = state.user && list.find(r => r.usuario_id === state.user.id);
+
+    let form;
+    if (!state.user) {
+      form = `<p class="notice notice--small">${ICON.alert} <span><a class="link" href="#/ingresar?next=${encodeURIComponent("producto/" + p.id)}">Ingresa a tu cuenta</a> para escribir una reseña.</span></p>`;
+    } else {
+      const cur = mine?.calificacion || 0;
+      form = `<form class="box review-form" id="reviewForm" novalidate>
+        <h3>${mine ? "Edita tu reseña" : "Escribe tu reseña"}</h3>
+        <div class="errsum" id="errSum" tabindex="-1" hidden></div>
+        <fieldset class="rate field" data-f="calificacion" aria-describedby="m_calificacion">
+          <legend>Tu calificación <span class="req" aria-hidden="true">*</span><span class="sr-only">(obligatorio)</span></legend>
+          <div class="rate__opts">${[1, 2, 3, 4, 5].map(n => `<label class="rate__opt" ${n === 1 ? 'for="f_calificacion" data-label="Calificación"' : ""}><input type="radio" name="calificacion" value="${n}" ${n === 1 ? 'id="f_calificacion"' : ""} ${n === cur ? "checked" : ""}><span aria-hidden="true">${"★".repeat(n)}</span><span class="sr-only">${plural(n, "estrella")}</span></label>`).join("")}</div>
+          <span class="msg" id="m_calificacion"></span>
+        </fieldset>
+        <div class="field" data-f="comentario">
+          <label for="f_comentario">Comentario</label>
+          <textarea id="f_comentario" name="comentario" rows="3" maxlength="500" aria-describedby="h_comentario m_comentario">${esc(mine?.comentario || "")}</textarea>
+          <span class="hint" id="h_comentario">Opcional. Máximo 500 caracteres.</span>
+          <span class="msg" id="m_comentario"></span>
+        </div>
+        <button class="btn btn--cafe" id="reviewBtn">${mine ? "Guardar cambios" : "Publicar reseña"}</button>
+      </form>`;
+    }
+    box.innerHTML = `${form}
+      ${total ? `<ul class="revlist">${list.map(r => `<li class="rev">
+        <div class="rev__head"><strong>${esc(r.autor || "Cliente")}</strong>
+          <span class="stars"><span aria-hidden="true">${starIcons(r.calificacion)}</span><span class="sr-only">${plural(r.calificacion, "estrella")} de 5</span></span>
+          <small>${fmtShort(new Date(r.creado_en))}</small></div>
+        ${r.comentario ? `<p>${esc(r.comentario)}</p>` : ""}
+        ${mine && r.id === mine.id ? `<button type="button" class="link" data-action="delReview" data-rid="${r.id}">Borrar mi reseña</button>` : ""}
+      </li>`).join("")}</ul>` : `<p class="hint">Esta gorra todavía no tiene reseñas.</p>`}`;
+    if (announceIt) announce(`${plural(total, "reseña")}, promedio ${promedio} de 5`);
+
+    $("#reviewForm")?.addEventListener("submit", async e => {
+      e.preventDefault();
+      const f = e.target, cal = Number(f.calificacion.value), com = f.comentario.value.trim();
+      if (showErrors(f, cal ? {} : { calificacion: "Elige de 1 a 5 estrellas." })) return;
+      const btn = $("#reviewBtn"); btn.disabled = true; btn.textContent = "Guardando…";
+      try {
+        await DB.guardarResena(state.user.id, p.id, cal, com);
+        toast(mine ? "Guardaste los cambios de tu reseña" : "¡Gracias! Tu reseña se publicó");
+        loadReviews(p, true);
+      } catch (err) {
+        dbError(err, "No pudimos publicar tu reseña. Intenta de nuevo.");
+        btn.disabled = false; btn.textContent = mine ? "Guardar cambios" : "Publicar reseña";
+      }
+    });
+  }
+
   function viewProduct(r) {
     const p = byId(r.arg);
     if (!p) return viewNotFound();
@@ -365,7 +480,7 @@
         <div class="info">
           <h1>${esc(p.nombre)}</h1>
           <p class="brandline">${esc(p.marca)} · ${esc(p.modelo)}</p>
-          <p class="stars"><span aria-hidden="true">★★★★☆</span><span class="sr-only">Calificación: 4 de 5 estrellas,</span> (24 reseñas)</p>
+          <p class="stars" id="starsLine">${starsLine(p.id)}</p>
           <p class="bigprice">${priceHTML(p)}</p>
           <p class="desc">${esc(p.desc)}</p>
           <span class="label" id="qtyLabel">Cantidad</span>
@@ -390,11 +505,16 @@
           </div>
         </div>
       </div>
+      <section class="reviews" aria-labelledby="revTitle">
+        <h2 class="section__title" id="revTitle">Reseñas</h2>
+        <div id="reviews"><p class="hint" role="status">Cargando reseñas…</p></div>
+      </section>
       <section class="related" aria-labelledby="relTitle">
         <h2 class="section__title" id="relTitle">También te puede gustar</h2>
         <div class="grid">${related.map(x => cardHTML(x, 3)).join("")}</div>
       </section>
     </div>`, p.nombre);
+    loadReviews(p);
 
     app.onclickDetail = action => {
       if (action.dataset.action === "dqty") {
@@ -406,6 +526,11 @@
       } else if (action.dataset.action === "addDetail") {
         addToCart(p.id, qty, action); // se queda en el detalle: botón «✓ Agregada» + aviso con «Ver carrito»
         $("#qtyHint").textContent = `Máximo 10 unidades por gorra. Ya tienes ${state.cart[p.id]} en tu carrito.`;
+      } else if (action.dataset.action === "delReview") {
+        if (!confirm("¿Borrar tu reseña de esta gorra?")) return;
+        DB.borrarResena(Number(action.dataset.rid))
+          .then(() => { toast("Borraste tu reseña"); loadReviews(p, true); })
+          .catch(e => dbError(e, "No pudimos borrar tu reseña. Intenta de nuevo."));
       } else if (action.dataset.action === "view") {
         const v = VIEWS[action.dataset.v];
         $$(".thumb").forEach(t => { t.classList.toggle("on", t === action); t.setAttribute("aria-pressed", t === action); });
@@ -457,10 +582,10 @@
           <form class="coupon" id="couponForm" novalidate>
             <label class="label" for="couponInput">Código de descuento</label>
             <div class="coupon__row">
-              <input id="couponInput" placeholder="Ej.: CROWN10" value="${esc(state.coupon)}" autocomplete="off" aria-describedby="couponMsg" ${state.coupon ? "readonly" : ""}>
-              <button class="btn btn--beige">${state.coupon ? "Quitar" : "Aplicar"}</button>
+              <input id="couponInput" placeholder="Ej.: CROWN10" value="${esc(state.coupon?.code || "")}" autocomplete="off" aria-describedby="couponMsg" ${state.coupon ? "readonly" : ""}>
+              <button class="btn btn--beige" id="couponBtn">${state.coupon ? "Quitar" : "Aplicar"}</button>
             </div>
-            <p class="hint ${state.coupon ? "ok" : ""}" id="couponMsg">${state.coupon ? `✓ Código ${esc(state.coupon)} aplicado: ${STORE.cupones[state.coupon] * 100}% de descuento.` : "Si tienes un código, escríbelo aquí. Para probar: CROWN10."}</p>
+            <p class="hint ${state.coupon ? "ok" : ""}" id="couponMsg">${state.coupon ? `✓ Código ${esc(state.coupon.code)} aplicado: ${state.coupon.pct} % de descuento.` : "Si tienes un código, escríbelo aquí. Para probar: CROWN10."}</p>
           </form>
           <button type="button" class="btn btn--verde btn--block btn--lg" data-action="pay">Reservar pedido</button>
           <p class="secure">En el siguiente paso puedes ingresar o continuar como invitado.</p>
@@ -474,16 +599,21 @@
       (same && !same.disabled ? same : other)?.focus();
     }
 
-    $("#couponForm").addEventListener("submit", e => {
+    // El código se revisa en la base (los códigos no se pueden ver desde el navegador)
+    $("#couponForm").addEventListener("submit", async e => {
       e.preventDefault();
-      if (state.coupon) { state.coupon = ""; persist(); viewCart(); toast("Quitaste el código de descuento"); return; }
+      if (state.coupon) { state.coupon = null; persist(); viewCart(); toast("Quitaste el código de descuento"); return; }
       const code = $("#couponInput").value.trim().toUpperCase();
-      if (STORE.cupones[code]) { state.coupon = code; persist(); viewCart(); toast(`Código ${code} aplicado: ${STORE.cupones[code] * 100}% de descuento`); }
-      else {
-        const m = $("#couponMsg"), i = $("#couponInput");
-        m.textContent = code ? `El código «${code}» no existe o ya venció. Revisa cómo está escrito.` : "Escribe un código antes de presionar Aplicar.";
-        m.className = "hint err"; i.setAttribute("aria-invalid", "true"); i.focus();
-      }
+      const m = $("#couponMsg"), i = $("#couponInput"), b = $("#couponBtn");
+      const fail = msg => { m.textContent = msg; m.className = "hint err"; i.setAttribute("aria-invalid", "true"); i.focus(); };
+      if (!code) return fail("Escribe un código antes de presionar Aplicar.");
+      b.disabled = true; b.textContent = "Revisando…";
+      let pct;
+      try { pct = await DB.validarCodigo(code); }
+      catch (err) { console.error(err); b.disabled = false; b.textContent = "Aplicar"; return fail("No pudimos revisar el código. Revisa tu conexión e intenta de nuevo."); }
+      if (!$("#couponForm")) return; // cambió de pantalla mientras revisaba
+      if (pct) { state.coupon = { code, pct }; persist(); viewCart(); toast(`Código ${code} aplicado: ${pct} % de descuento`); }
+      else { b.disabled = false; b.textContent = "Aplicar"; fail(`El código «${code}» no existe o ya venció. Revisa cómo está escrito.`); }
     });
   }
 
@@ -504,12 +634,12 @@
           <p class="req-note">Los campos marcados con <span class="req" aria-hidden="true">*</span> son obligatorios.</p>
           <div class="errsum" id="errSum" tabindex="-1" hidden></div>
           <form id="authForm" novalidate>
-            ${!isIn ? field("nombre", "Nombre completo", { auto: "name", req: true, hint: "Como quieres que te saludemos." }) : ""}
+            ${!isIn ? `<div class="grid2">${field("nombre", "Nombre", { auto: "given-name", req: true, hint: "Como quieres que te saludemos." })}${field("apellido", "Apellido", { auto: "family-name", req: true })}</div>` : ""}
             ${field("email", "Correo electrónico", { type: "email", ph: "correo@ejemplo.com", auto: "email", req: true })}
             ${field("pass", "Contraseña", { type: "password", auto: isIn ? "current-password" : "new-password", req: true, hint: isIn ? "" : "Mínimo 6 caracteres.", reveal: true })}
             ${!isIn ? field("pass2", "Repite la contraseña", { type: "password", auto: "new-password", req: true, reveal: true }) : ""}
             ${isIn ? '<p><button type="button" class="link" data-action="forgot">¿Olvidaste tu contraseña?</button></p>' : ""}
-            <button class="btn btn--cafe btn--block">${isIn ? "Ingresar" : "Crear cuenta"}</button>
+            <button class="btn btn--cafe btn--block" id="authBtn">${isIn ? "Ingresar" : "Crear cuenta"}</button>
           </form>
           <div class="or" aria-hidden="true">o</div>
           <button type="button" class="btn btn--borde btn--block" data-action="guest">Continuar como invitado</button>
@@ -521,31 +651,89 @@
       $(".tabs").addEventListener("keydown", e => { // flechas para cambiar de pestaña (patrón ARIA de pestañas)
         if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) { e.preventDefault(); tab = tab === "ingresar" ? "crear" : "ingresar"; draw(true); }
       });
-      $("#authForm").addEventListener("submit", e => {
+      $("#authForm").addEventListener("submit", async e => {
         e.preventDefault();
-        const v = formValues(e.target);
+        const form = e.target;
+        if (form.dataset.busy) return; // evita enviar dos veces
+        const v = formValues(form);
         const errs = {};
         if (!isIn && v.nombre.length < 2) errs.nombre = "Escribe tu nombre.";
+        if (!isIn && v.apellido.length < 2) errs.apellido = "Escribe tu apellido.";
         if (!v.email) errs.email = "Escribe tu correo electrónico.";
         else if (!EMAIL.test(v.email)) errs.email = "El correo debe tener la forma nombre@dominio.com.";
         if (!v.pass) errs.pass = "Escribe tu contraseña.";
         else if (v.pass.length < 6) errs.pass = "La contraseña debe tener al menos 6 caracteres.";
         if (!isIn && v.pass !== v.pass2) errs.pass2 = "Las dos contraseñas no son iguales.";
-        if (showErrors(e.target, errs)) return;
-        // Demo sin servidor: no se guarda la contraseña, solo el nombre y el correo.
-        const nombre = !isIn ? v.nombre : v.email.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-        state.user = { nombre, email: v.email };
-        state.guest = false; persist();
-        toast(!isIn ? `¡Listo, ${nombre.split(" ")[0]}! Tu cuenta fue creada.` : `Hola de nuevo, ${nombre.split(" ")[0]}`);
+        if (showErrors(form, errs)) return;
+
+        // Supabase Auth guarda la contraseña cifrada; la tienda nunca la ve.
+        const btn = $("#authBtn");
+        form.dataset.busy = "1"; btn.disabled = true; btn.classList.add("is-loading");
+        btn.textContent = isIn ? "Ingresando…" : "Creando cuenta…";
+        announce(btn.textContent);
+        const fail = msg => {
+          delete form.dataset.busy; btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = isIn ? "Ingresar" : "Crear cuenta";
+          const sum = $("#errSum"); sum.hidden = false;
+          sum.innerHTML = `<h2>${ICON.alert} ${esc(msg)}</h2>`; sum.focus();
+        };
+        try {
+          const res = isIn ? await DB.ingresar(v.email, v.pass) : await DB.crearCuenta(v.email, v.pass, v.nombre, v.apellido);
+          if (!res.session) { // el proyecto pide confirmar el correo antes de entrar
+            delete form.dataset.busy; btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = "Crear cuenta";
+            const sum = $("#errSum"); sum.hidden = false; sum.classList.add("errsum--ok");
+            sum.innerHTML = `<h2>${ICON.check} Revisa tu correo</h2><p>Te enviamos un enlace a <b>${esc(v.email)}</b>. Ábrelo para activar tu cuenta y luego ingresa.</p>`;
+            sum.focus();
+            return;
+          }
+          await loadUser(res.session);
+        } catch (err) {
+          console.error(err);
+          return fail(DB.authMessage(err));
+        }
+        toast(!isIn ? `¡Listo, ${state.user.nombre.split(" ")[0]}! Tu cuenta fue creada.` : `Hola de nuevo, ${state.user.nombre.split(" ")[0]}`);
         go("#/" + next);
       });
     };
-    app.onclickDetail = a => {
+    app.onclickDetail = async a => {
       if (a.dataset.action === "tab" && a.dataset.t !== tab) { tab = a.dataset.t; draw(true); }
       if (a.dataset.action === "guest") { state.guest = true; persist(); toast("Continúas como invitado"); go("#/" + next); }
-      if (a.dataset.action === "forgot") toast("Te enviaríamos un enlace a tu correo para crear una nueva contraseña (demo).");
+      if (a.dataset.action === "forgot") {
+        const email = $("#f_email").value.trim();
+        if (!EMAIL.test(email)) return showErrors($("#authForm"), { email: "Escribe tu correo para enviarte el enlace." });
+        a.disabled = true;
+        try { await DB.recuperarClave(email); toast(`Te enviamos un enlace a ${email} para crear una nueva contraseña`); }
+        catch (err) { console.error(err); toast(DB.authMessage(err)); }
+        a.disabled = false;
+      }
     };
     draw();
+  }
+
+  /* ---------- Nueva contraseña (enlace del correo de recuperación) ---------- */
+  function viewNewPassword() {
+    if (!state.user) {
+      return mount(`<div class="wrap section"><div class="empty"><h1>El enlace ya no sirve</h1><p>Pide otro enlace desde «¿Olvidaste tu contraseña?» en la pantalla de ingreso.</p><a class="btn btn--cafe" href="#/ingresar">Ir a Ingresar</a></div></div>`, "Nueva contraseña");
+    }
+    mount(`<div class="wrap"><div class="auth"><div class="auth__box">
+      <h1>Crea una nueva contraseña</h1>
+      <p class="req-note">Los campos marcados con <span class="req" aria-hidden="true">*</span> son obligatorios.</p>
+      <div class="errsum" id="errSum" tabindex="-1" hidden></div>
+      <form id="passForm" novalidate>
+        ${field("pass", "Nueva contraseña", { type: "password", auto: "new-password", req: true, hint: "Mínimo 6 caracteres.", reveal: true })}
+        ${field("pass2", "Repite la contraseña", { type: "password", auto: "new-password", req: true, reveal: true })}
+        <button class="btn btn--cafe btn--block" id="passBtn">Guardar contraseña</button>
+      </form>
+    </div></div></div>`, "Nueva contraseña");
+    $("#passForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const v = formValues(e.target), errs = {};
+      if (v.pass.length < 6) errs.pass = "La contraseña debe tener al menos 6 caracteres.";
+      if (v.pass !== v.pass2) errs.pass2 = "Las dos contraseñas no son iguales.";
+      if (showErrors(e.target, errs)) return;
+      const btn = $("#passBtn"); btn.disabled = true; btn.textContent = "Guardando…";
+      try { await DB.cambiarClave(v.pass); toast("Listo, tu contraseña se cambió"); go("#/catalogo"); }
+      catch (err) { console.error(err); btn.disabled = false; btn.textContent = "Guardar contraseña"; toast(DB.authMessage(err)); }
+    });
   }
 
   /* ---------- Formularios accesibles ---------- */
@@ -590,7 +778,6 @@
     if (!state.user && !state.guest) return go("#/ingresar?next=checkout");
     let sending = false;
     const u = state.user || {};
-    const [nom = "", ...ape] = (u.nombre || "").split(" ");
     const t = totals();
 
     mount(`<div class="wrap">
@@ -606,11 +793,11 @@
           <form id="checkoutForm" novalidate>
             <fieldset class="box" data-step="0"><legend>Tus datos</legend>
               <div class="grid2">
-                ${field("nombre", "Nombre", { auto: "given-name", value: nom, req: true })}
-                ${field("apellido", "Apellido", { auto: "family-name", value: ape.join(" "), req: true, hint: "Lo pediremos al retirar el pedido." })}
+                ${field("nombre", "Nombre", { auto: "given-name", value: u.nombre, req: true })}
+                ${field("apellido", "Apellido", { auto: "family-name", value: u.apellido, req: true, hint: "Lo pediremos al retirar el pedido." })}
               </div>
               ${field("email", "Correo electrónico", { type: "email", ph: "correo@ejemplo.com", auto: "email", value: u.email, req: true, hint: "Te avisaremos aquí cuando tu pedido esté listo para retirar." })}
-              ${field("telefono", "Teléfono", { type: "tel", auto: "tel", req: true, hint: "Ej.: 0991234567. Por si necesitamos contactarte." })}
+              ${field("telefono", "Celular", { type: "tel", auto: "tel", value: u.telefono, req: true, hint: "10 números que empiezan con 09. Ej.: 0991234567.", extra: 'inputmode="numeric" maxlength="12"' })}
               <label class="check"><input type="checkbox" name="ofertas"> Quiero recibir ofertas por correo</label>
             </fieldset>
             <fieldset class="box" data-step="1"><legend>Retiro y pago</legend>
@@ -619,6 +806,7 @@
                 <div>
                   <strong>${esc(STORE.local.nombre)}</strong>
                   ${STORE.local.direccion ? `<p>${esc(STORE.local.direccion)}</p>` : ""}
+                  ${STORE.local.enlace_mapa ? `<p><a class="link" href="${esc(STORE.local.enlace_mapa)}" target="_blank" rel="noopener">Cómo llegar<span class="sr-only"> (se abre en otra pestaña)</span></a></p>` : ""}
                   <p>${esc(STORE.local.horario)}</p>
                 </div>
               </div>
@@ -626,7 +814,7 @@
                 <li>Te enviamos un correo cuando tu pedido esté listo.</li>
                 <li>Vas al local, das tu número de pedido y tu nombre.</li>
                 <li>Pagas ahí al retirar. No pagas nada en línea.</li>
-                <li><b>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</b></li>
+                <li><b>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</b> Si reservas hoy, tienes hasta el ${esc(limiteTexto(isoDate(addDays(new Date(), 3))))}.</li>
               </ul>
               <label class="check check--box" for="f_acepto" data-label="Confirmación de retiro"><input type="checkbox" name="acepto" id="f_acepto" aria-describedby="m_acepto"> Entiendo que debo retirar y pagar el pedido en el local.</label>
               <div class="field" data-f="acepto"><span class="msg" id="m_acepto"></span></div>
@@ -661,7 +849,7 @@
       if (e.target.name === "acepto" && e.target.checked) { const f = $('[data-f="acepto"]', form); f.classList.remove("bad"); $(".msg", f).textContent = ""; }
     });
 
-    form.addEventListener("submit", e => {
+    form.addEventListener("submit", async e => {
       e.preventDefault();
       if (sending) return; // evita reservar dos veces
       const v = formValues(form);
@@ -669,7 +857,9 @@
       if (v.nombre.length < 2) errs.nombre = "Escribe tu nombre.";
       if (v.apellido.length < 2) errs.apellido = "Escribe tu apellido.";
       if (!v.email) errs.email = "Escribe tu correo."; else if (!EMAIL.test(v.email)) errs.email = "El correo debe tener la forma nombre@dominio.com.";
-      if (v.telefono.replace(/\D/g, "").length < 7) errs.telefono = "Escribe un teléfono de al menos 7 números.";
+      const tel = v.telefono.replace(/[\s-]/g, "");
+      if (!tel) errs.telefono = "Escribe tu número de celular.";
+      else if (!/^09\d{8}$/.test(tel)) errs.telefono = "El celular debe tener 10 números y empezar con 09, por ejemplo 0991234567.";
       if (!form.acepto.checked) errs.acepto = "Marca la casilla para confirmar que retirarás y pagarás en el local.";
       if (showErrors(form, errs)) return;
 
@@ -678,74 +868,110 @@
       const btn = $("#confirmBtn");
       btn.disabled = true; btn.classList.add("is-loading"); btn.textContent = "Reservando pedido…";
       announce("Reservando tu pedido, espera un momento");
-      setTimeout(() => {
-        const order = {
-          num: String(Math.floor(100000 + Math.random() * 900000)),
-          fecha: new Date().toISOString(),
-          items: cartItems().map(({ p, qty }) => ({ id: p.id, qty, precio: p.precio })),
-          ...totals(), cupon: state.coupon,
-          cliente: `${v.nombre} ${v.apellido}`, email: v.email, telefono: v.telefono,
-          retiro: localTexto()
-        };
-        state.orders.unshift(order);
-        state.cart = {}; state.coupon = ""; persist();
-        go("#/confirmacion/" + order.num);
-      }, 900);
+      // La base calcula precios, descuento y stock; el navegador solo manda qué gorras y cuántas.
+      try {
+        const r = await DB.reservar({ ...v, telefono: tel }, state.cart, state.coupon?.code, STORE.local.id);
+        state.lastOrder = { numero: r.numero, total: Number(r.total), fecha_limite: r.fecha_limite, cliente: `${v.nombre} ${v.apellido}`, email: v.email };
+        if (state.user && !state.user.telefono) {
+          state.user.telefono = tel;
+          DB.guardarTelefono(state.user.id, tel).catch(e => console.error(e)); // para la próxima reserva
+        }
+        state.cart = {}; state.coupon = null; persist(); updateHeader();
+        go("#/confirmacion/" + r.numero);
+      } catch (e) {
+        console.error(e);
+        sending = false;
+        btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = `Confirmar reserva · ${money(totals().total)}`;
+        const sum = $("#errSum"); sum.hidden = false;
+        sum.innerHTML = `<h2>${ICON.alert} No pudimos reservar tu pedido</h2><p>${esc(/fetch|network/i.test(e.message) ? "Revisa tu conexión a internet e intenta de nuevo." : e.message)}</p>`;
+        sum.focus();
+      }
     });
   }
 
   /* ---------- 07 Confirmación ---------- */
+  // Los datos vienen de la reserva recién hecha (el invitado no puede leer pedidos de la base)
   function viewConfirm(r) {
-    const o = state.orders.find(x => x.num === r.arg);
-    if (!o) return viewNotFound();
+    const o = state.lastOrder;
+    if (!o || o.numero !== r.arg) return viewNotFound();
     mount(`<div class="wrap"><div class="done">
       <div class="done__check">${ICON.check}</div>
       <h1>¡Pedido reservado!</h1>
-      <p>Tu pedido <b>#${o.num}</b> está reservado. Te escribiremos a <b>${esc(o.email)}</b> cuando esté listo para retirar.</p>
+      <p>Tu pedido <b>${esc(o.numero)}</b> está reservado. Te escribiremos a <b>${esc(o.email)}</b> cuando esté listo para retirar.</p>
       <section class="panel" aria-labelledby="resTitle">
         <h2 id="resTitle">Resumen</h2>
         <dl class="sum">
           <div class="row"><dt>A nombre de</dt><dd>${esc(o.cliente)}</dd></div>
-          <div class="row"><dt>Retiro</dt><dd style="text-align:right">${esc(o.retiro || STORE.local.nombre)}<br><small>${esc(STORE.local.horario)}</small></dd></div>
+          <div class="row"><dt>Retiro</dt><dd style="text-align:right">${esc(localTexto())}<br><small>${esc(STORE.local.horario)}</small></dd></div>
+          <div class="row"><dt>Retira hasta el</dt><dd>${esc(limiteTexto(o.fecha_limite))}</dd></div>
           <div class="row"><dt>Pago</dt><dd>Al retirar, en el local</dd></div>
           <div class="row row--total"><dt>Total a pagar</dt><dd>${money(o.total)}</dd></div>
         </dl>
-        <p class="notice notice--small">${ICON.store} Lleva tu número de pedido <b>#${o.num}</b> al local. Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</p>
+        <p class="notice notice--small">${ICON.store} Lleva tu número de pedido <b>${esc(o.numero)}</b> al local. Si no te acercas hasta el ${esc(limiteTexto(o.fecha_limite))}, tu reserva se cancelará.</p>
       </section>
       <div class="actions">
         <a class="btn btn--cafe" href="#/catalogo">Seguir comprando</a>
-        <a class="btn btn--borde" href="#/pedidos">Ver mis pedidos</a>
+        ${state.user ? `<a class="btn btn--borde" href="#/pedidos">Ver mis pedidos</a>` : ""}
       </div>
+      ${state.user ? "" : `<p class="hint">Reservaste como invitado: guarda tu número de pedido. <a class="link" href="#/ingresar?tab=crear&next=pedidos">Crea una cuenta</a> para ver tus próximas reservas en «Mis pedidos».</p>`}
     </div></div>`, "Pedido reservado");
   }
 
-  /* ---------- Mis pedidos ---------- */
-  function viewOrders() {
-    const list = state.orders;
-    mount(`<div class="wrap">
-      ${crumbs([["Catálogo", "#/catalogo"], ["Mis pedidos"]])}
+  /* ---------- Mis pedidos (en la base, solo con sesión) ---------- */
+  const ESTADO = { reservado: "Reservado", retirado: "Retirado", cancelado: "Cancelado" };
+  async function viewOrders() {
+    const head = `${crumbs([["Catálogo", "#/catalogo"], ["Mis pedidos"]])}
       <div class="pagehead" style="justify-content:space-between;flex-wrap:wrap">
         <h1>Mis pedidos</h1>
-        ${state.user ? `<p>${esc(state.user.nombre)} · ${esc(state.user.email)} · <a class="link" href="#/salir">Cerrar sesión</a></p>` : ""}
-      </div>
-      ${list.length ? `<ul class="orders">${list.map(o => `<li class="order">
-        <div class="order__head"><h2>Pedido #${o.num}</h2><span class="badge">Retiro en el local</span><span>${fmtShort(new Date(o.fecha))} · <b>${money(o.total)}</b></span></div>
-        <div class="pics">${o.items.map(i => { const p = byId(i.id); return p ? `<a href="#/producto/${p.id}"><img src="${p.img}" alt="${esc(p.nombre)}, ${plural(i.qty, "unidad", "unidades")}"></a>` : ""; }).join("")}</div>
-        <p class="hint">${plural(o.items.reduce((n, i) => n + i.qty, 0), "producto")} · pagas al retirar · ${esc(o.retiro || STORE.local.nombre)}</p>
-      </li>`).join("")}</ul>`
-        : `<div class="empty"><h2>Todavía no tienes pedidos</h2><p>Cuando reserves, tus pedidos aparecerán aquí.</p><a class="btn btn--cafe" href="#/catalogo">Ver catálogo</a></div>`}
-    </div>`, "Mis pedidos");
+        ${state.user ? `<p>${esc(state.user.nombre)} ${esc(state.user.apellido)} · ${esc(state.user.email)} · <a class="link" href="#/salir">Cerrar sesión</a></p>` : ""}
+      </div>`;
+    if (!state.user) {
+      return mount(`<div class="wrap">${head}<div class="empty"><h2>Ingresa para ver tus pedidos</h2><p>Tus reservas se guardan en tu cuenta.</p><a class="btn btn--cafe" href="#/ingresar?next=pedidos">Ingresar</a></div></div>`, "Mis pedidos");
+    }
+    mount(`<div class="wrap">${head}<p class="hint" role="status" id="ordersStatus">Cargando tus pedidos…</p><div id="ordersList"></div></div>`, "Mis pedidos");
+    let list;
+    try { list = await DB.pedidos(); }
+    catch (e) {
+      console.error(e);
+      if ($("#ordersStatus")) $("#ordersStatus").innerHTML = `No pudimos cargar tus pedidos. <a class="link" href="#/pedidos" data-action="reloadOrders">Reintentar</a>`;
+      return;
+    }
+    if (!$("#ordersList")) return; // cambió de pantalla
+    $("#ordersStatus").textContent = list.length ? `Tienes ${plural(list.length, "pedido")}.` : "";
+    $("#ordersList").innerHTML = list.length ? `<ul class="orders">${list.map(o => {
+      const n = o.pedido_items.reduce((s, i) => s + i.cantidad, 0);
+      const hist = [...o.pedido_estados].sort((a, b) => a.cambiado_en.localeCompare(b.cambiado_en));
+      return `<li class="order">
+        <div class="order__head"><h2>Pedido ${esc(o.numero)}</h2><span class="badge badge--${o.estado}">${ESTADO[o.estado]}</span><span>${fmtShort(new Date(o.creado_en))} · <b>${money(Number(o.total))}</b></span></div>
+        <div class="pics">${o.pedido_items.map(i => { const p = byId(i.producto_id); return p ? `<a href="#/producto/${p.id}"><img src="${p.img}" alt="${esc(i.nombre_producto)}, ${plural(i.cantidad, "unidad", "unidades")}"></a>` : ""; }).join("")}</div>
+        <p class="hint">${plural(n, "producto")}${o.codigos_descuento ? ` · código ${esc(o.codigos_descuento.codigo)} (−${money(Number(o.descuento))})` : ""} · pagas al retirar · ${esc(localTexto())}</p>
+        ${o.estado === "reservado" ? `<p class="hint"><b>Retira hasta el ${esc(limiteTexto(o.fecha_limite))}.</b></p>` : ""}
+        <ol class="timeline" aria-label="Historial del pedido ${esc(o.numero)}">${hist.map(h => `<li class="timeline__item timeline__item--${h.estado}">${ESTADO[h.estado]} · ${fmtShort(new Date(h.cambiado_en))}</li>`).join("")}</ol>
+        ${o.estado === "reservado" ? `<button type="button" class="btn btn--borde btn--sm" data-action="cancelOrder" data-oid="${o.id}" data-num="${esc(o.numero)}">Cancelar reserva</button>` : ""}
+      </li>`;
+    }).join("")}</ul>`
+      : `<div class="empty"><h2>Todavía no tienes pedidos</h2><p>Cuando reserves, tus pedidos aparecerán aquí.</p><a class="btn btn--cafe" href="#/catalogo">Ver catálogo</a></div>`;
+
+    app.onclickDetail = async a => {
+      if (a.dataset.action !== "cancelOrder") return;
+      if (!confirm(`¿Cancelar la reserva ${a.dataset.num}? Las gorras vuelven a estar disponibles para otras personas.`)) return;
+      a.disabled = true; a.textContent = "Cancelando…";
+      try { await DB.cancelarReserva(Number(a.dataset.oid)); toast(`Cancelaste la reserva ${a.dataset.num}`); viewOrders(); }
+      catch (e) { a.disabled = false; a.textContent = "Cancelar reserva"; dbError(e, "No pudimos cancelar la reserva. Intenta de nuevo."); }
+    };
   }
 
   /* ---------- Información ---------- */
-  const INFO = {
+  // Función: el local llega de la base después de cargar la página
+  const INFO = () => ({
     ayuda: ["Ayuda", `<h2>Preguntas frecuentes</h2>
       <dl class="faq">
         <dt>¿Cómo compro?</dt><dd>Elige una gorra, presiona «Agregar al carrito», abre el carrito y presiona «Reservar pedido». Puedes hacerlo con cuenta o como invitado. Luego retiras y pagas en el local.</dd>
         <dt>¿Qué talla es?</dt><dd>Todas son talla única con ajuste atrás, salvo las marcadas como «Niño».</dd>
         <dt>¿Puedo cambiar mi pedido?</dt><dd>Antes de confirmar, sí: vuelve al carrito y cambia las cantidades. Después, escríbenos a hola@nqcrown.com.</dd>
         <dt>¿Hacen envíos?</dt><dd>No. Todas las compras se retiran y se pagan en el local.</dd>
-        <dt>¿Se guarda mi carrito?</dt><dd>Sí, en este navegador. Si cierras la página, tu carrito y tus favoritas siguen ahí.</dd>
+        <dt>¿Se guarda mi carrito?</dt><dd>Sí. Con tu cuenta, tu carrito y tus favoritas se guardan y los ves en cualquier dispositivo. Como invitado, el carrito queda guardado en este navegador.</dd>
+        <dt>¿Puedo cancelar una reserva?</dt><dd>Sí. Ingresa a tu cuenta, abre «Mis pedidos» y presiona «Cancelar reserva».</dd>
       </dl>`],
     retiro: ["Retiro en el local", `<p>No hacemos envíos. Reservas en línea y retiras en <b>${esc(localTexto())}</b>.</p>
       <ul><li><b>Horario:</b> ${esc(STORE.local.horario)}.</li><li>Te avisamos por correo cuando tu pedido está listo.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><b>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</b></li></ul>`],
@@ -766,9 +992,9 @@
         <li>Los botones de solo ícono (corazón, carrito, mostrar contraseña) tienen nombre.</li>
         <li>Los avisos (agregado al carrito, errores, total nuevo) se leen en voz alta automáticamente.</li>
       </ul>`]
-  };
+  });
   function viewInfo(r) {
-    const i = INFO[r.arg];
+    const i = INFO()[r.arg];
     if (!i) return viewNotFound();
     mount(`<div class="wrap">${crumbs([["Catálogo", "#/catalogo"], [i[0]]])}<article class="prose"><h1>${i[0]}</h1>${i[1]}</article></div>`, i[0]);
   }
@@ -786,8 +1012,9 @@
       case "skip": (($("h1", app)) || app).focus(); break;
       case "add": addToCart(Number(id), 1, a); break;
       case "fav": {
-        const on = toggleFav(id), p = byId(id);
-        $$(`.fav[data-id="${id}"]`).forEach(b => { b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); b.setAttribute("aria-label", favLabel(p, on)); b.title = on ? "Quitar de favoritas" : "Guardar en favoritas"; });
+        const on = toggleFav(id);
+        if (on === null) break;
+        paintFav(id, on);
         const r = parseHash();
         if (r.name === "catalogo" && r.q.get("f") === "fav") render();
         break;
@@ -823,6 +1050,9 @@
         break;
       }
       case "focusField": e.preventDefault(); $("#" + a.dataset.target)?.focus(); break;
+      case "toReviews": e.preventDefault(); $("#revTitle")?.scrollIntoView({ block: "start" }); $("#revTitle")?.setAttribute("tabindex", "-1"); $("#revTitle")?.focus({ preventScroll: true }); break;
+      case "retryReviews": app.retryReviews && app.retryReviews(); break;
+      case "reloadOrders": e.preventDefault(); viewOrders(); break;
       default: app.onclickDetail && app.onclickDetail(a);
     }
   });
@@ -840,9 +1070,39 @@
     }
   });
 
-  window.addEventListener("hashchange", () => { app.onclickDetail = null; render(); });
-  // Mantener el carrito al día entre pestañas
-  window.addEventListener("storage", e => { if (e.key?.startsWith("nqc_")) { Object.keys(state).forEach(k => state[k] = load(k, state[k])); render(); } });
+  let ready = false; // no pintar pantallas hasta tener el catálogo de la base
+  window.addEventListener("hashchange", () => { app.onclickDetail = null; if (ready) render(); });
+  // Carrito del invitado al día entre pestañas (con sesión vive en la base)
+  window.addEventListener("storage", e => {
+    if (e.key === "nqc_cart" && !state.user) { state.cart = load("cart", {}); render(); }
+  });
 
-  render();
+  /* ---------- Inicio: catálogo, local y sesión desde la base ---------- */
+  async function init() {
+    app.innerHTML = `<div class="wrap section"><p class="hint" role="status">Cargando la tienda…</p></div>`;
+    try {
+      const [productos, local, ratings] = await Promise.all([DB.productos(), DB.local(), DB.calificaciones()]);
+      if (productos.length) PRODUCTS = productos;
+      if (local) STORE.local = local;
+      state.ratings = ratings;
+      await loadUser(await DB.sesion());
+    } catch (e) {
+      console.error(e);
+      app.innerHTML = `<div class="wrap section"><div class="empty"><h1 tabindex="-1">No pudimos conectar con la tienda</h1><p>Revisa tu conexión a internet e intenta de nuevo.</p><button type="button" class="btn btn--cafe" id="retryInit">Reintentar</button></div></div>`;
+      $("h1", app).focus();
+      $("#retryInit").addEventListener("click", init);
+      return;
+    }
+    ready = true;
+    render();
+  }
+
+  // Avisos de Supabase Auth: sesión cerrada en otra pestaña o enlace para cambiar la contraseña.
+  // Se usa setTimeout para no llamar a la base dentro del aviso (Supabase lo recomienda).
+  DB.sb.auth.onAuthStateChange((event, session) => setTimeout(async () => {
+    if (event === "SIGNED_OUT" && state.user) { state.user = null; state.favs = []; state.cart = {}; persist(); if (ready) render(); }
+    if (event === "PASSWORD_RECOVERY") { try { await loadUser(session); } catch (e) { console.error(e); } go("#/nueva-clave"); }
+  }, 0));
+
+  init();
 })();
