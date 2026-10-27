@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=11">
+  <link rel="stylesheet" href="css/styles.css?v=12">
 </head>
 <body>
   <!-- Primer elemento al presionar Tab: salta el menú (WCAG 2.4.1) -->
@@ -29,14 +29,28 @@
       </nav>
       <form class="search" id="searchForm" role="search">
         <label class="sr-only" for="searchInput">Buscar gorra por nombre, equipo o color</label>
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <button type="submit" class="search__btn" aria-label="Buscar" title="Buscar"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
         <input id="searchInput" type="search" placeholder="Buscar gorra" aria-keyshortcuts="/" autocomplete="off">
         <kbd class="kbd" aria-hidden="true" title="Atajo de teclado">/</kbd>
       </form>
-      <a class="account" id="accountLink" href="#/ingresar">Ingresar</a>
+      <!-- Sin sesión: enlace «Ingresar». Con sesión: botón que abre el menú de la cuenta -->
+      <div class="account" id="account">
+        <a class="account__link" id="accountLink" href="#/ingresar">Ingresar</a>
+        <button type="button" class="account__btn" id="accountBtn" aria-expanded="false" aria-controls="accountMenu" hidden>
+          <span class="account__avatar" id="accountAvatar" aria-hidden="true"></span>
+          <span id="accountName"></span><span class="sr-only">: menú de mi cuenta</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <ul class="account__menu" id="accountMenu" hidden>
+          <li><a href="#/perfil">Mis datos</a></li>
+          <li><a href="#/pedidos">Mis pedidos</a></li>
+          <li><a href="#/catalogo?f=fav">Mis favoritas</a></li>
+          <li><a href="#/salir">Cerrar sesión</a></li>
+        </ul>
+      </div>
       <a class="cartbtn" id="cartBtn" href="#/carrito">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 4h2l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.1L21 8H6.2"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17.5" cy="20" r="1.3"/></svg>
-        <span>Carrito (<b id="cartCount">0</b>)</span>
+        <span>Carrito (<strong id="cartCount">0</strong>)</span>
         <span class="sr-only" id="cartSr">, 0 productos</span>
       </a>
     </div>
@@ -48,19 +62,21 @@
     <div class="wrap footer__in">
       <div>
         <strong>NQ Crown</strong>
-        <small>Gorras con carácter</small>
+        <span class="sm">Gorras con carácter</span>
       </div>
       <nav aria-label="Ayuda e información">
         <a href="#/info/ayuda">Ayuda</a> · <a href="#/info/retiro">Retiro en el local</a> · <a href="#/info/devoluciones">Devoluciones</a> · <a href="#/info/contacto">Contacto</a> · <a href="#/info/accesibilidad">Accesibilidad</a>
       </nav>
-      <small class="copy">© 2026 NQ Crown</small>
+      <span class="sm copy">© 2026 NQ Crown</span>
     </div>
   </footer>
 
   <!-- Aviso visible (microinteracciones) y región solo para lectores de pantalla -->
+  <!-- Los botones del aviso se crean solo al mostrarlo (ningún botón queda vacío) -->
   <div class="toast" id="toast" role="status" aria-live="polite">
-    <span id="toastMsg"></span>
-    <button type="button" class="toast__btn" id="toastBtn" hidden></button>
+    <span class="toast__icon" id="toastIcon" aria-hidden="true"></span>
+    <p class="toast__msg" id="toastMsg"></p>
+    <div class="toast__actions" id="toastActions"></div>
   </div>
   <div class="sr-only" id="srLive" aria-live="polite"></div>
 
@@ -68,7 +84,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="js/data.js?v=8"></script>
-  <script src="js/db.js?v=11"></script>
-  <script src="js/app.js?v=11"></script>
+  <script src="js/db.js?v=12"></script>
+  <script src="js/app.js?v=12"></script>
 </body>
 </html>

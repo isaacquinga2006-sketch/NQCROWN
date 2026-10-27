@@ -1,6 +1,7 @@
 /* NQ Crown · tienda de una sola página con rutas por hash (#/catalogo, #/producto/3 …).
    Catálogo, cuentas, favoritos, carrito, reservas y reseñas viven en Supabase (js/db.js).
-   El invitado guarda su carrito en el navegador. No hay pagos en línea. */
+   Sin sesión se puede mirar y llenar el carrito (queda en el navegador); para reservar hay que ingresar.
+   No hay pagos en línea. */
 (() => {
   "use strict";
 
@@ -33,22 +34,21 @@
   const load = (k, def) => { try { const v = localStorage.getItem("nqc_" + k); return v ? JSON.parse(v) : def; } catch { return def; } };
   const save = (k, v) => { try { localStorage.setItem("nqc_" + k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } };
 
-  // En el navegador solo queda lo del invitado; con sesión, carrito y favoritas vienen de la base.
+  // Sin sesión el carrito queda en el navegador; con sesión, carrito y favoritas vienen de la base.
   const state = {
     cart: load("cart", {}),          // { idProducto: cantidad }
     favs: [],                        // [idProducto], solo con sesión
     user: null,                      // { id, nombre, apellido, email, telefono }
-    guest: load("guest", false),     // compra como invitado
     coupon: (c => c && c.pct ? c : null)(load("coupon", null)), // { code, pct } validado en la base
-    lastOrder: load("lastOrder", null), // última reserva (para la confirmación del invitado)
+    lastOrder: load("lastOrder", null), // última reserva (para la pantalla de confirmación)
     ratings: {}                      // { idProducto: { promedio, total } }
   };
   const persist = () => {
     save("cart", state.user ? {} : state.cart);
-    save("guest", state.guest); save("coupon", state.coupon); save("lastOrder", state.lastOrder);
+    save("coupon", state.coupon); save("lastOrder", state.lastOrder);
   };
   // Cualquier error de la base se muestra en un aviso (nunca falla en silencio)
-  const dbError = (e, msg = "No pudimos guardar el cambio. Revisa tu conexión e intenta de nuevo.") => { console.error(e); toast(msg); };
+  const dbError = (e, msg = "No pudimos guardar el cambio. Revisa tu conexión e intenta de nuevo.") => { console.error(e); toast(msg, null, "error"); };
 
   const cartItems = () => Object.entries(state.cart)
     .map(([id, qty]) => ({ p: byId(id), qty }))
@@ -64,7 +64,7 @@
   const localTexto = () => [STORE.local.nombre, STORE.local.direccion].filter(Boolean).join(" · ");
   const limiteTexto = iso => fmtDate(new Date(iso + "T12:00:00")); // «viernes, 30 de octubre»
 
-  // Datos de la cuenta: perfil, favoritas y carrito. El carrito del invitado se suma al de la cuenta.
+  // Datos de la cuenta: perfil, favoritas y carrito. El carrito armado sin sesión se suma al de la cuenta.
   async function loadUser(session) {
     if (!session) { state.user = null; state.favs = []; return; }
     const u = session.user;
@@ -75,28 +75,47 @@
     Object.entries(local).forEach(([id, q]) => { cart[id] = Math.min(10, (cart[id] || 0) + q); });
     if (Object.keys(local).length) await DB.guardarCarrito(u.id, cart);
     state.cart = cart;
-    state.guest = false;
     persist();
   }
 
   /* ---------- Respuesta del sistema (microinteracciones) ---------- */
-  let toastTimer, toastAction = null;
-  // Aviso que dura 5 s, se pausa con el mouse o el foco y puede tener un botón (Deshacer, Ver carrito).
-  function toast(msg, action) {
-    const t = $("#toast"), b = $("#toastBtn");
+  // Aviso grande en el centro de la pantalla. El color y el ícono cambian según el tipo:
+  // «ok» (verde, se hizo), «info» (morado, hace falta algo) y «error» (rojo, algo falló).
+  // Dura 6 s (los errores 9 s), se pausa con el mouse o el foco y se cierra con «Esc» o con ✕.
+  let toastTimer, toastAction = null, toastMs = 6000;
+  const TOAST_ICON = { ok: "check", info: "alert", error: "alert" };
+  function toast(msg, action, type = "ok") {
+    const t = $("#toast");
+    t.className = `toast toast--${type}`;
+    t.setAttribute("role", type === "error" ? "alert" : "status");
+    $("#toastIcon").innerHTML = ICON[TOAST_ICON[type]];
     $("#toastMsg").textContent = msg;
     toastAction = action || null;
-    b.hidden = !action;
-    if (action) b.textContent = action.label;
+    $("#toastActions").innerHTML = (action ? `<button type="button" class="toast__btn" data-toast="run">${esc(action.label)}</button>` : "")
+      + `<button type="button" class="toast__close" data-toast="close" aria-label="Cerrar aviso" title="Cerrar aviso">✕</button>`;
+    void t.offsetWidth; // reinicia la animación si ya estaba visible
     t.classList.add("show");
+    toastMs = type === "error" ? 9000 : 6000;
     restartToast();
   }
-  function restartToast() { clearTimeout(toastTimer); toastTimer = setTimeout(() => $("#toast").classList.remove("show"), 5000); }
+  function hideToast() {
+    clearTimeout(toastTimer);
+    const t = $("#toast");
+    if (t.contains(document.activeElement)) app.focus({ preventScroll: true });
+    t.classList.remove("show");
+    $("#toastActions").innerHTML = ""; // sin botones vacíos ni ocultos en el aviso cerrado
+  }
+  function restartToast() { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, toastMs); }
   $("#toast").addEventListener("mouseenter", () => clearTimeout(toastTimer));
   $("#toast").addEventListener("mouseleave", restartToast);
   $("#toast").addEventListener("focusin", () => clearTimeout(toastTimer));
   $("#toast").addEventListener("focusout", restartToast);
-  $("#toastBtn").addEventListener("click", () => { const a = toastAction; $("#toast").classList.remove("show"); a && a.run(); });
+  $("#toast").addEventListener("click", e => {
+    const b = e.target.closest("[data-toast]");
+    if (!b) return;
+    const a = toastAction; hideToast();
+    if (b.dataset.toast === "run" && a) a.run();
+  });
   // Anuncio solo para lectores de pantalla (cambios que no tienen aviso visible).
   const announce = msg => { const r = $("#srLive"); r.textContent = ""; setTimeout(() => { r.textContent = msg; }, 60); };
 
@@ -112,7 +131,7 @@
       setTimeout(() => { if (btn.isConnected) { btn.classList.remove("is-done"); btn.innerHTML = old; } }, 1400);
     }
     const msg = before + qty > 10 ? `Máximo 10 unidades de ${p.nombre}` : `${p.nombre} se agregó al carrito (${plural(cartCount(), "producto")})`;
-    toast(msg, { label: "Ver carrito", run: () => go("#/carrito") });
+    toast(msg, { label: "Ver carrito", run: () => go("#/carrito") }, before + qty > 10 ? "info" : "ok");
   }
   function setQty(id, qty) {
     if (qty <= 0) delete state.cart[id]; else state.cart[id] = Math.min(10, qty);
@@ -123,13 +142,13 @@
   function removeItem(id) {
     const p = byId(id), qty = state.cart[id];
     setQty(id, 0); viewCart();
-    toast(`Quitaste ${p.nombre} del carrito`, { label: "Deshacer", run: () => { setQty(id, qty); viewCart(); announce(`${p.nombre} volvió al carrito`); } });
+    toast(`Quitaste ${p.nombre} del carrito`, { label: "Deshacer", run: () => { setQty(id, qty); viewCart(); announce(`${p.nombre} volvió al carrito`); } }, "info");
   }
   // Las favoritas se guardan en la cuenta: sin sesión se pide ingresar (no se pierden en otro dispositivo).
   function toggleFav(id) {
     id = Number(id);
     if (!state.user) {
-      toast("Ingresa a tu cuenta para guardar favoritas", { label: "Ingresar", run: () => go("#/ingresar?next=" + encodeURIComponent(location.hash.replace(/^#\/?/, "") || "catalogo")) });
+      toast("Ingresa a tu cuenta para guardar favoritas", { label: "Ingresar", run: () => go("#/ingresar?next=" + encodeURIComponent(location.hash.replace(/^#\/?/, "") || "catalogo")) }, "info");
       return null;
     }
     const on = !state.favs.includes(id);
@@ -146,7 +165,7 @@
     const p = byId(id);
     $$(`.fav[data-id="${id}"]`).forEach(b => { b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); b.setAttribute("aria-label", favLabel(p, on)); b.title = on ? "Quitar de favoritas" : "Guardar en favoritas"; });
   }
-  const favLabel = (p, on) => on ? `Quitar ${p.nombre} de favoritas` : `Guardar ${p.nombre} en favoritas`;
+  const favLabel = (p, on) => on ? `Quitar ${p.nombre} de favoritas` : `Guardar ${p.nombre} en favoritas${state.user ? "" : " (necesitas ingresar)"}`;
 
   /* ---------- Rutas ---------- */
   function parseHash() {
@@ -168,10 +187,11 @@
     pedidos: viewOrders,
     info: viewInfo,
     "nueva-clave": viewNewPassword,
+    perfil: viewProfile,
     salir: async () => {
       try { await DB.salir(); } catch (e) { return dbError(e, "No pudimos cerrar tu sesión. Intenta de nuevo."); }
-      state.user = null; state.favs = []; state.cart = {}; state.guest = false; persist();
-      toast("Cerraste sesión"); go("#/catalogo");
+      state.user = null; state.favs = []; state.cart = {}; persist();
+      toast("Cerraste sesión", null, "info"); go("#/catalogo");
     }
   };
 
@@ -187,9 +207,13 @@
     const n = cartCount();
     $("#cartCount").textContent = n;
     $("#cartSr").textContent = ", " + plural(n, "producto");
-    const acc = $("#accountLink");
-    if (state.user) { acc.textContent = "Hola, " + state.user.nombre.split(" ")[0]; acc.href = "#/pedidos"; acc.setAttribute("aria-label", `Hola, ${state.user.nombre.split(" ")[0]}: ver mis pedidos y mi cuenta`); }
-    else { acc.textContent = "Ingresar"; acc.href = "#/ingresar"; acc.removeAttribute("aria-label"); }
+    // Con sesión: botón con el nombre que abre el menú (Mis datos, Mis pedidos, Mis favoritas, Cerrar sesión)
+    $("#accountLink").hidden = !!state.user;
+    $("#accountBtn").hidden = !state.user;
+    if (state.user) {
+      $("#accountName").textContent = "Hola, " + state.user.nombre.split(" ")[0];
+      $("#accountAvatar").textContent = (state.user.nombre[0] || "?").toUpperCase();
+    } else closeAccountMenu();
     const navKey = r.name === "catalogo" && r.q.get("f") === "fav" ? "favoritos" : r.name;
     $$(".mainnav a").forEach(a => {
       const on = a.dataset.nav === navKey;
@@ -199,6 +223,28 @@
     const s = $("#searchInput");
     if (document.activeElement !== s) s.value = r.name === "catalogo" ? (r.q.get("q") || "") : "";
   }
+
+  // Menú de la cuenta (patrón «disclosure»: botón con aria-expanded + lista de enlaces)
+  function openAccountMenu() {
+    $("#accountMenu").hidden = false; $("#accountBtn").setAttribute("aria-expanded", "true");
+    $("#accountMenu a").focus();
+  }
+  function closeAccountMenu(returnFocus = false) {
+    if ($("#accountMenu").hidden) return;
+    $("#accountMenu").hidden = true; $("#accountBtn").setAttribute("aria-expanded", "false");
+    if (returnFocus) $("#accountBtn").focus();
+  }
+  $("#accountBtn").addEventListener("click", () => $("#accountMenu").hidden ? openAccountMenu() : closeAccountMenu());
+  $("#account").addEventListener("keydown", e => {
+    if (e.key === "Escape" && !$("#accountMenu").hidden) { e.stopPropagation(); closeAccountMenu(true); }
+    if (["ArrowDown", "ArrowUp"].includes(e.key) && !$("#accountMenu").hidden) { // flechas para moverse por el menú
+      e.preventDefault();
+      const links = $$("#accountMenu a"), i = links.indexOf(document.activeElement);
+      links[(i + (e.key === "ArrowDown" ? 1 : -1) + links.length) % links.length].focus();
+    }
+  });
+  $("#account").addEventListener("focusout", e => { if (e.relatedTarget && !$("#account").contains(e.relatedTarget)) closeAccountMenu(); });
+  document.addEventListener("click", e => { if (!e.target.closest("#account")) closeAccountMenu(); });
 
   // Pinta la pantalla, cambia el título de la pestaña y lleva el foco al título (lectores de pantalla).
   function mount(html, title) {
@@ -213,7 +259,7 @@
 
   /* ---------- Piezas reutilizables ---------- */
   const priceHTML = p => p.antes
-    ? `<span class="price"><span class="sr-only">Precio de oferta </span>${money(p.precio)} <s><span class="sr-only">antes </span>${money(p.antes)}</s></span>`
+    ? `<span class="price"><span class="sr-only">Precio de oferta </span>${money(p.precio)} <del><span class="sr-only">antes </span>${money(p.antes)}</del></span>`
     : `<span class="price">${money(p.precio)}</span>`;
 
   function cardHTML(p, headingLevel = 3) {
@@ -228,10 +274,18 @@
       <div class="card__body">
         <h${headingLevel} class="card__title" id="c${p.id}-${headingLevel}"><a class="card__name" href="#/producto/${p.id}">${esc(p.nombre)}</a></h${headingLevel}>
         <span class="card__meta">${esc(p.tipo)} · ${esc(p.color)}</span>
+        ${cardRating(p.id)}
         ${priceHTML(p)}
         <button type="button" class="btn btn--cafe btn--block" data-action="add" data-id="${p.id}" aria-label="Agregar ${esc(p.nombre)} al carrito">Agregar al carrito</button>
       </div>
     </article>`;
+  }
+
+  // Calificación corta en la tarjeta (solo si la gorra tiene reseñas)
+  function cardRating(id) {
+    const r = state.ratings[id];
+    if (!r || !r.total) return "";
+    return `<span class="card__rating"><span aria-hidden="true">★</span> ${r.promedio.toFixed(1)}<span class="sr-only"> de 5 estrellas,</span> (${plural(r.total, "reseña")})</span>`;
   }
 
   function summaryRows(t) {
@@ -305,7 +359,7 @@
     let n = 0;
     const group = (key, title, options) => `<fieldset class="facet"><legend>${title}</legend>${options.map(([value, label, count]) => {
       const id = `fl${n++}`, on = sel[key].includes(value);
-      return `<label class="facet__opt ${count || on ? "" : "is-empty"}" for="${id}"><input type="checkbox" id="${id}" data-facet="${key}" value="${esc(value)}" ${on ? "checked" : ""} ${count || on ? "" : "disabled"}><span>${esc(label)}</span><small aria-label="${plural(count, "gorra")}">${count}</small></label>`;
+      return `<label class="facet__opt ${count || on ? "" : "is-empty"}" for="${id}"><input type="checkbox" id="${id}" data-facet="${key}" value="${esc(value)}" ${on ? "checked" : ""} ${count || on ? "" : "disabled"}><span>${esc(label)}</span><span class="sm" aria-label="${plural(count, "gorra")}">${count}</span></label>`;
     }).join("")}</fieldset>`;
     const facetsHTML = FACETS.map(fc => {
       const values = [...new Set(PRODUCTS.map(fc.get))].sort((a, b) => a === "Sin equipo" ? 1 : b === "Sin equipo" ? -1 : a.localeCompare(b, "es"));
@@ -333,11 +387,7 @@
     const openPanel = load("filtrosAbiertos", false);
     const showHero = f === "all" && !term && page === 1 && !nSel;
     mount(`
-      ${showHero ? `<section class="hero" aria-labelledby="heroTitle"><div class="wrap">
-        <h1 id="heroTitle">Corona para cada estilo</h1>
-        <p>Gorras, viseras y buckets de tus equipos favoritos. Reserva en línea, retira y paga en el local.</p>
-        <button type="button" class="btn btn--negro" data-action="scroll">Ver catálogo</button>
-      </div></section>` : ""}
+      ${showHero ? heroHTML() : ""}
       <section class="wrap section" id="catalogo-lista" aria-labelledby="catTitle">
         ${showHero ? `<h2 class="section__title" id="catTitle" tabindex="-1">Catálogo</h2>` : `<h1 class="section__title" id="catTitle">${f === "fav" ? "Mis favoritas" : term ? "Resultados de búsqueda" : "Catálogo"}</h1>`}
         <div class="toolbar">
@@ -349,6 +399,7 @@
         <div class="catalog">
           <aside class="filters ${openPanel ? "is-open" : ""}" id="filtros" aria-labelledby="filtersTitle">
             <div class="filters__head"><h2 id="filtersTitle">Filtrar gorras</h2>${nSel ? `<button type="button" class="link" data-action="clearfacets">Limpiar todo</button>` : ""}</div>
+            <p class="hint filters__hint">Marca una opción con <kbd>Enter</kbd> o <kbd>Espacio</kbd>.</p>
             ${facetsHTML}
           </aside>
           <div class="catalog__results">
@@ -369,6 +420,46 @@
       setCatalogQuery({ [cb.dataset.facet]: vals.join("|"), p: 1 }, true);
       $("#" + id)?.focus(); // el foco se queda en la misma casilla
     });
+    // Enter también marca la casilla (por defecto solo la barra espaciadora lo hace)
+    $("#filtros").addEventListener("keydown", e => {
+      if (e.key === "Enter" && e.target.matches('input[type="checkbox"]')) { e.preventDefault(); e.target.click(); }
+    });
+  }
+
+  /* ---------- Portada del catálogo ---------- */
+  // Gorras destacadas, accesos rápidos a Nuevas / En oferta / equipos y cómo funciona la compra.
+  function heroHTML() {
+    const picks = [...PRODUCTS.filter(p => p.nuevo), ...PRODUCTS.filter(p => !p.nuevo && p.antes)].slice(0, 3);
+    const teams = Object.entries(PRODUCTS.reduce((m, p) => { if (p.equipo !== "Sin equipo") m[p.equipo] = (m[p.equipo] || 0) + 1; return m; }, {}))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "es")).slice(0, 4);
+    const nNuevas = PRODUCTS.filter(p => p.nuevo).length, nOferta = PRODUCTS.filter(p => p.antes).length;
+    return `<section class="hero" aria-labelledby="heroTitle"><div class="wrap hero__in">
+      <div class="hero__text">
+        <p class="hero__eyebrow">Gorras originales · Retiro en el local</p>
+        <h1 id="heroTitle">Corona para cada estilo</h1>
+        <p class="hero__lead">Gorras, viseras y buckets de tus equipos favoritos. Reserva en línea en un minuto, retira y paga en el local.</p>
+        <div class="hero__ctas">
+          <button type="button" class="btn btn--negro btn--lg" data-action="scroll">Ver catálogo</button>
+          <a class="btn btn--borde btn--lg" href="#/catalogo?f=oferta">Ver ofertas (${nOferta})</a>
+        </div>
+        <ul class="hero__steps" aria-label="Cómo comprar">
+          <li><span class="hero__num" aria-hidden="true">1</span><span><strong>Reserva en línea</strong><span class="sm">con tu cuenta o con Google</span></span></li>
+          <li><span class="hero__num" aria-hidden="true">2</span><span><strong>Retira en el local</strong><span class="sm">en máximo 3 días</span></span></li>
+          <li><span class="hero__num" aria-hidden="true">3</span><span><strong>Paga al retirar</strong><span class="sm">sin pagos en línea</span></span></li>
+        </ul>
+      </div>
+      <ul class="hero__picks" aria-label="Gorras destacadas">${picks.map((p, i) => `<li class="hero__pick hero__pick--${i}">
+        <a href="#/producto/${p.id}"><img src="${p.img}" alt="${esc(p.alt)}"><span class="hero__pickname">${esc(p.nombre)}<span class="sm">${money(p.precio)}${p.nuevo ? " · Nueva" : " · Oferta"}</span></span></a>
+      </li>`).join("")}</ul>
+    </div>
+    <div class="wrap hero__quick">
+      <h2 class="hero__quicktitle">Explora rápido</h2>
+      <ul class="hero__chips">
+        <li><a class="qchip qchip--nueva" href="#/catalogo?f=nuevo">Nuevas <span class="sm">(${nNuevas})</span></a></li>
+        <li><a class="qchip qchip--oferta" href="#/catalogo?f=oferta">En oferta <span class="sm">(${nOferta})</span></a></li>
+        ${teams.map(([t, c]) => `<li><a class="qchip" href="#/catalogo?e=${encodeURIComponent(t)}">${esc(t)} <span class="sm">(${c})</span></a></li>`).join("")}
+      </ul>
+    </div></section>`;
   }
 
   function setCatalogQuery(changes, replace = false) {
@@ -439,7 +530,7 @@
       ${total ? `<ul class="revlist">${list.map(r => `<li class="rev">
         <div class="rev__head"><strong>${esc(r.autor || "Cliente")}</strong>
           <span class="stars"><span aria-hidden="true">${starIcons(r.calificacion)}</span><span class="sr-only">${plural(r.calificacion, "estrella")} de 5</span></span>
-          <small>${fmtShort(new Date(r.creado_en))}</small></div>
+          <span class="sm">${fmtShort(new Date(r.creado_en))}</span></div>
         ${r.comentario ? `<p>${esc(r.comentario)}</p>` : ""}
         ${mine && r.id === mine.id ? `<button type="button" class="link" data-action="delReview" data-rid="${r.id}">Borrar mi reseña</button>` : ""}
       </li>`).join("")}</ul>` : `<p class="hint">Esta gorra todavía no tiene reseñas.</p>`}`;
@@ -495,9 +586,9 @@
             <button type="button" class="fav ${fav ? "on" : ""}" data-action="fav" data-id="${p.id}" aria-pressed="${fav}" aria-label="${esc(favLabel(p, fav))}" title="${fav ? "Quitar de favoritas" : "Guardar en favoritas"}">${ICON.heart}</button>
           </div>
           <ul class="perks" aria-label="Beneficios">
-            <li class="perk"><strong>Retiro en el local</strong><small>sin costo</small></li>
-            <li class="perk"><strong>Devolución</strong><small>en 15 días</small></li>
-            <li class="perk"><strong>Pagas al retirar</strong><small>en el local</small></li>
+            <li class="perk"><strong>Retiro en el local</strong><span class="sm">sin costo</span></li>
+            <li class="perk"><strong>Devolución</strong><span class="sm">en 15 días</span></li>
+            <li class="perk"><strong>Pagas al retirar</strong><span class="sm">en el local</span></li>
           </ul>
           <div class="specs">
             <h2>Detalles del producto</h2>
@@ -562,7 +653,7 @@
             <div class="line__prod">
               <img src="${p.img}" alt="${esc(p.alt)}">
               <div><a href="#/producto/${p.id}">${esc(p.nombre)}</a>
-                <small>${esc(p.tipo)} · ${esc(p.color)} · ${money(p.precio)} c/u</small>
+                <span class="sm">${esc(p.tipo)} · ${esc(p.color)} · ${money(p.precio)} c/u</span>
                 <button type="button" class="link" data-action="remove" data-id="${p.id}" aria-label="Eliminar ${esc(p.nombre)} del carrito">Eliminar</button></div>
             </div>
             <div class="qty" role="group" aria-label="Cantidad de ${esc(p.nombre)}">
@@ -578,7 +669,7 @@
         <aside class="panel" aria-labelledby="sumTitle">
           <h2 id="sumTitle">Resumen del pedido</h2>
           ${summaryRows(t)}
-          <p class="notice notice--small">${ICON.store} No hacemos envíos: retiras tu pedido y pagas en ${esc(localTexto())}.</p>
+          <p class="notice notice--small">${ICON.store}<span>No hacemos envíos: retiras tu pedido y pagas en ${esc(localTexto())}.</span></p>
           <form class="coupon" id="couponForm" novalidate>
             <label class="label" for="couponInput">Código de descuento</label>
             <div class="coupon__row">
@@ -588,7 +679,7 @@
             <p class="hint ${state.coupon ? "ok" : ""}" id="couponMsg">${state.coupon ? `✓ Código ${esc(state.coupon.code)} aplicado: ${state.coupon.pct} % de descuento.` : "Si tienes un código, escríbelo aquí. Para probar: CROWN10."}</p>
           </form>
           <button type="button" class="btn btn--verde btn--block btn--lg" data-action="pay">Reservar pedido</button>
-          <p class="secure">En el siguiente paso puedes ingresar o continuar como invitado.</p>
+          <p class="secure">${state.user ? "En el siguiente paso confirmas tus datos de contacto." : "En el siguiente paso ingresas a tu cuenta o entras con Google."}</p>
         </aside>
       </div></div>`, "Carrito");
 
@@ -602,7 +693,7 @@
     // El código se revisa en la base (los códigos no se pueden ver desde el navegador)
     $("#couponForm").addEventListener("submit", async e => {
       e.preventDefault();
-      if (state.coupon) { state.coupon = null; persist(); viewCart(); toast("Quitaste el código de descuento"); return; }
+      if (state.coupon) { state.coupon = null; persist(); viewCart(); toast("Quitaste el código de descuento", null, "info"); return; }
       const code = $("#couponInput").value.trim().toUpperCase();
       const m = $("#couponMsg"), i = $("#couponInput"), b = $("#couponBtn");
       const fail = msg => { m.textContent = msg; m.className = "hint err"; i.setAttribute("aria-invalid", "true"); i.focus(); };
@@ -624,7 +715,7 @@
     const draw = (focusTab = false) => {
       const isIn = tab === "ingresar";
       mount(`<div class="wrap"><div class="auth">
-        ${next === "checkout" ? `<p class="notice">${ICON.alert} Para terminar tu compra, ingresa a tu cuenta o continúa como invitado.</p>` : ""}
+        ${next === "checkout" ? `<p class="notice">${ICON.alert}<span>Para reservar tu pedido, ingresa a tu cuenta, crea una o entra con Google. Tu carrito se mantiene.</span></p>` : ""}
         <div class="tabs" role="tablist" aria-label="Tipo de acceso">
           <button type="button" role="tab" id="tab-ingresar" aria-controls="authPanel" class="${isIn ? "on" : ""}" aria-selected="${isIn}" tabindex="${isIn ? 0 : -1}" data-action="tab" data-t="ingresar">Ingresar</button>
           <button type="button" role="tab" id="tab-crear" aria-controls="authPanel" class="${!isIn ? "on" : ""}" aria-selected="${!isIn}" tabindex="${!isIn ? 0 : -1}" data-action="tab" data-t="crear">Crear cuenta</button>
@@ -642,8 +733,8 @@
             <button class="btn btn--cafe btn--block" id="authBtn">${isIn ? "Ingresar" : "Crear cuenta"}</button>
           </form>
           <div class="or" aria-hidden="true">o</div>
-          <button type="button" class="btn btn--borde btn--block" data-action="guest">Continuar como invitado</button>
-          <p class="fine">Como invitado no necesitas contraseña; solo te pediremos tus datos de contacto para la reserva.</p>
+          <button type="button" class="btn btn--google btn--block" data-action="google" id="googleBtn"><svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 2.9-2.2 5.4-4.7 7.1l7.6 5.9c4.4-4.1 6.9-10.1 6.9-17.5z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.3 0-11.6-4.2-13.5-10l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg> Continuar con Google</button>
+          <p class="fine">Usamos tu cuenta de Google solo para ingresar: tu nombre y tu correo. No vemos tu contraseña.</p>
         </div>
       </div></div>`, isIn ? "Ingresar" : "Crear cuenta");
       if (focusTab) $(`#tab-${tab}`).focus();
@@ -681,7 +772,7 @@
           if (!res.session) { // el proyecto pide confirmar el correo antes de entrar
             delete form.dataset.busy; btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = "Crear cuenta";
             const sum = $("#errSum"); sum.hidden = false; sum.classList.add("errsum--ok");
-            sum.innerHTML = `<h2>${ICON.check} Revisa tu correo</h2><p>Te enviamos un enlace a <b>${esc(v.email)}</b>. Ábrelo para activar tu cuenta y luego ingresa.</p>`;
+            sum.innerHTML = `<h2>${ICON.check} Revisa tu correo</h2><p>Te enviamos un enlace a <strong>${esc(v.email)}</strong>. Ábrelo para activar tu cuenta y luego ingresa.</p>`;
             sum.focus();
             return;
           }
@@ -696,13 +787,18 @@
     };
     app.onclickDetail = async a => {
       if (a.dataset.action === "tab" && a.dataset.t !== tab) { tab = a.dataset.t; draw(true); }
-      if (a.dataset.action === "guest") { state.guest = true; persist(); toast("Continúas como invitado"); go("#/" + next); }
+      if (a.dataset.action === "google") {
+        a.disabled = true; a.classList.add("is-loading");
+        try { sessionStorage.setItem("nqc_next", next); } catch { /* sin almacenamiento */ }
+        try { await DB.ingresarConGoogle(); } // la página se va a Google y vuelve con la sesión
+        catch (err) { console.error(err); a.disabled = false; a.classList.remove("is-loading"); toast(DB.authMessage(err), null, "error"); }
+      }
       if (a.dataset.action === "forgot") {
         const email = $("#f_email").value.trim();
         if (!EMAIL.test(email)) return showErrors($("#authForm"), { email: "Escribe tu correo para enviarte el enlace." });
         a.disabled = true;
         try { await DB.recuperarClave(email); toast(`Te enviamos un enlace a ${email} para crear una nueva contraseña`); }
-        catch (err) { console.error(err); toast(DB.authMessage(err)); }
+        catch (err) { console.error(err); toast(DB.authMessage(err), null, "error"); }
         a.disabled = false;
       }
     };
@@ -732,7 +828,79 @@
       if (showErrors(e.target, errs)) return;
       const btn = $("#passBtn"); btn.disabled = true; btn.textContent = "Guardando…";
       try { await DB.cambiarClave(v.pass); toast("Listo, tu contraseña se cambió"); go("#/catalogo"); }
-      catch (err) { console.error(err); btn.disabled = false; btn.textContent = "Guardar contraseña"; toast(DB.authMessage(err)); }
+      catch (err) { console.error(err); btn.disabled = false; btn.textContent = "Guardar contraseña"; toast(DB.authMessage(err), null, "error"); }
+    });
+  }
+
+  /* ---------- Mis datos (perfil en la base) ---------- */
+  function viewProfile() {
+    if (!state.user) return go("#/ingresar?next=perfil");
+    const u = state.user;
+    mount(`<div class="wrap">
+      ${crumbs([["Catálogo", "#/catalogo"], ["Mis datos"]])}
+      <div class="pagehead"><span class="account__avatar account__avatar--lg" aria-hidden="true">${esc((u.nombre[0] || "?").toUpperCase())}</span><h1>Mis datos</h1></div>
+      <div class="profile">
+        <form class="box" id="profileForm" novalidate>
+          <h2 class="box__title">Información personal</h2>
+          <p class="req-note">Los campos marcados con <span class="req" aria-hidden="true">*</span> son obligatorios.</p>
+          <div class="errsum" id="errSum" tabindex="-1" hidden></div>
+          <div class="grid2">
+            ${field("nombre", "Nombre", { auto: "given-name", value: u.nombre, req: true, hint: "Así te saludamos en la tienda." })}
+            ${field("apellido", "Apellido", { auto: "family-name", value: u.apellido, req: true })}
+          </div>
+          ${field("telefono", "Celular", { type: "tel", auto: "tel", value: u.telefono, hint: "Opcional. 10 números que empiezan con 09. Lo usamos para llenar tus reservas.", extra: 'inputmode="numeric" maxlength="12"' })}
+          <div class="field"><span class="label" id="emailLabel">Correo electrónico</span><p class="readonly" aria-labelledby="emailLabel">${esc(u.email)}</p><span class="hint">Con este correo ingresas a tu cuenta.</span></div>
+          <button class="btn btn--cafe" id="profileBtn">Guardar cambios</button>
+        </form>
+        <form class="box" id="passForm" novalidate>
+          <h2 class="box__title">Cambiar contraseña</h2>
+          <div class="errsum" id="errSum2" tabindex="-1" hidden></div>
+          ${field("pass", "Nueva contraseña", { type: "password", auto: "new-password", req: true, hint: "Mínimo 6 caracteres.", reveal: true })}
+          ${field("pass2", "Repite la contraseña", { type: "password", auto: "new-password", req: true, reveal: true })}
+          <button class="btn btn--borde" id="passBtn">Cambiar contraseña</button>
+        </form>
+        <nav class="box profile__links" aria-label="Mi cuenta">
+          <h2 class="box__title">Mi cuenta</h2>
+          <ul>
+            <li><a class="link" href="#/pedidos">Mis pedidos</a></li>
+            <li><a class="link" href="#/catalogo?f=fav">Mis favoritas (${state.favs.length})</a></li>
+            <li><a class="link" href="#/salir">Cerrar sesión</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>`, "Mis datos");
+
+    const pf = $("#profileForm");
+    pf.addEventListener("submit", async e => {
+      e.preventDefault();
+      if (pf.dataset.busy) return;
+      const v = formValues(pf), errs = {}, tel = v.telefono.replace(/[\s-]/g, "");
+      if (v.nombre.length < 2) errs.nombre = "Escribe tu nombre.";
+      if (v.apellido.length < 2) errs.apellido = "Escribe tu apellido.";
+      if (tel && !/^09\d{8}$/.test(tel)) errs.telefono = "El celular debe tener 10 números y empezar con 09, por ejemplo 0991234567.";
+      if (showErrors(pf, errs)) return;
+      const btn = $("#profileBtn");
+      pf.dataset.busy = "1"; btn.disabled = true; btn.classList.add("is-loading"); btn.textContent = "Guardando…";
+      try {
+        await DB.actualizarPerfil(u.id, { nombre: v.nombre, apellido: v.apellido, telefono: tel || null });
+        Object.assign(state.user, { nombre: v.nombre, apellido: v.apellido, telefono: tel });
+        updateHeader();
+        toast("Guardamos tus datos");
+      } catch (err) { dbError(err, "No pudimos guardar tus datos. Intenta de nuevo."); }
+      delete pf.dataset.busy; btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = "Guardar cambios";
+    });
+
+    const pw = $("#passForm");
+    pw.addEventListener("submit", async e => {
+      e.preventDefault();
+      const v = formValues(pw), errs = {};
+      if (v.pass.length < 6) errs.pass = "La contraseña debe tener al menos 6 caracteres.";
+      if (v.pass !== v.pass2) errs.pass2 = "Las dos contraseñas no son iguales.";
+      if (showErrors(pw, errs, "#errSum2")) return;
+      const btn = $("#passBtn"); btn.disabled = true; btn.textContent = "Cambiando…";
+      try { await DB.cambiarClave(v.pass); pw.reset(); toast("Listo, tu contraseña se cambió"); }
+      catch (err) { console.error(err); toast(DB.authMessage(err), null, "error"); }
+      btn.disabled = false; btn.textContent = "Cambiar contraseña";
     });
   }
 
@@ -753,15 +921,15 @@
   }
   const formValues = form => Object.fromEntries([...new FormData(form)].map(([k, v]) => [k, String(v).trim()]));
   // Marca los campos con error, muestra un resumen arriba con enlaces y lleva el foco al resumen.
-  function showErrors(form, errs) {
-    $$(".field", form).forEach(f => {
+  function showErrors(form, errs, sumSel = "#errSum") {
+    $$(".field[data-f]", form).forEach(f => {
       const msg = errs[f.dataset.f] || "";
       f.classList.toggle("bad", !!msg);
       $(".msg", f).innerHTML = msg ? `${ICON.alert} ${esc(msg)}` : "";
       $("input", f)?.setAttribute("aria-invalid", msg ? "true" : "false");
     });
     const keys = Object.keys(errs);
-    const sum = $("#errSum");
+    const sum = $(sumSel);
     if (!keys.length) { if (sum) sum.hidden = true; return false; }
     if (sum) {
       sum.hidden = false;
@@ -774,8 +942,8 @@
 
   /* ---------- 06 Checkout (reserva para retirar) ---------- */
   function viewCheckout() {
-    if (!cartItems().length) { toast("Tu carrito está vacío; agrega una gorra primero"); return go("#/carrito"); }
-    if (!state.user && !state.guest) return go("#/ingresar?next=checkout");
+    if (!cartItems().length) { toast("Tu carrito está vacío; agrega una gorra primero", null, "info"); return go("#/carrito"); }
+    if (!state.user) return go("#/ingresar?next=checkout");
     let sending = false;
     const u = state.user || {};
     const t = totals();
@@ -784,9 +952,9 @@
       ${crumbs([["Catálogo", "#/catalogo"], ["Carrito", "#/carrito"], ["Reservar pedido"]])}
       <h1 class="section__title">Reservar pedido</h1>
       <ol class="steps" aria-label="Pasos de la reserva">
-        <li class="step" data-step="0"><b>1</b>Tus datos</li><li class="step" data-step="1"><b>2</b>Retiro y pago</li>
+        <li class="step" data-step="0"><strong>1</strong>Tus datos</li><li class="step" data-step="1"><strong>2</strong>Retiro y pago</li>
       </ol>
-      <p class="req-note">${state.guest && !state.user ? "Reservas como invitado. " : ""}Los campos marcados con <span class="req" aria-hidden="true">*</span> son obligatorios.</p>
+      <p class="req-note">Los campos marcados con <span class="req" aria-hidden="true">*</span> son obligatorios.</p>
       <div class="layout">
         <div>
           <div class="errsum" id="errSum" tabindex="-1" hidden></div>
@@ -814,7 +982,7 @@
                 <li>Te enviamos un correo cuando tu pedido esté listo.</li>
                 <li>Vas al local, das tu número de pedido y tu nombre.</li>
                 <li>Pagas ahí al retirar. No pagas nada en línea.</li>
-                <li><b>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</b> Si reservas hoy, tienes hasta el ${esc(limiteTexto(isoDate(addDays(new Date(), 3))))}.</li>
+                <li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong> Si reservas hoy, tienes hasta el ${esc(limiteTexto(isoDate(addDays(new Date(), 3))))}.</li>
               </ul>
               <label class="check check--box" for="f_acepto" data-label="Confirmación de retiro"><input type="checkbox" name="acepto" id="f_acepto" aria-describedby="m_acepto"> Entiendo que debo retirar y pagar el pedido en el local.</label>
               <div class="field" data-f="acepto"><span class="msg" id="m_acepto"></span></div>
@@ -824,7 +992,7 @@
         </div>
         <aside class="panel" id="resumen" aria-labelledby="sumTitle">
           <h2 id="sumTitle">Resumen del pedido</h2>
-          <ul class="minis">${cartItems().map(({ p, qty }) => `<li class="mini"><img src="${p.img}" alt="${esc(p.alt)}"><div><strong>${esc(p.nombre)}</strong><small>${esc(p.color)} · ${plural(qty, "unidad", "unidades")}</small></div><span>${money(p.precio * qty)}</span></li>`).join("")}</ul>
+          <ul class="minis">${cartItems().map(({ p, qty }) => `<li class="mini"><img src="${p.img}" alt="${esc(p.alt)}"><div><strong>${esc(p.nombre)}</strong><span class="sm">${esc(p.color)} · ${plural(qty, "unidad", "unidades")}</span></div><span>${money(p.precio * qty)}</span></li>`).join("")}</ul>
           <a class="link small" href="#/carrito">Cambiar productos</a>
           <div style="margin-top:12px">${summaryRows(t)}</div>
           <button class="btn btn--verde btn--block btn--lg" form="checkoutForm" id="confirmBtn">Confirmar reserva · ${money(t.total)}</button>
@@ -837,7 +1005,7 @@
     const setStep = n => $$(".step").forEach((s, i) => {
       s.classList.toggle("is-current", i === n); s.classList.toggle("is-done", i < n);
       i === n ? s.setAttribute("aria-current", "step") : s.removeAttribute("aria-current");
-      $("b", s).innerHTML = i < n ? `${ICON.check}<span class="sr-only">completado:</span>` : i + 1;
+      $("strong", s).innerHTML = i < n ? `${ICON.check}<span class="sr-only">completado:</span>` : i + 1;
     });
     setStep(0);
     form.addEventListener("focusin", e => { const fs = e.target.closest("[data-step]"); if (fs) setStep(+fs.dataset.step); });
@@ -871,7 +1039,10 @@
       // La base calcula precios, descuento y stock; el navegador solo manda qué gorras y cuántas.
       try {
         const r = await DB.reservar({ ...v, telefono: tel }, state.cart, state.coupon?.code, STORE.local.id);
-        state.lastOrder = { numero: r.numero, total: Number(r.total), fecha_limite: r.fecha_limite, cliente: `${v.nombre} ${v.apellido}`, email: v.email };
+        state.lastOrder = {
+          numero: r.numero, subtotal: Number(r.subtotal), descuento: Number(r.descuento), total: Number(r.total),
+          codigo: state.coupon, fecha_limite: r.fecha_limite, cliente: `${v.nombre} ${v.apellido}`, email: v.email
+        };
         if (state.user && !state.user.telefono) {
           state.user.telefono = tel;
           DB.guardarTelefono(state.user.id, tel).catch(e => console.error(e)); // para la próxima reserva
@@ -890,30 +1061,31 @@
   }
 
   /* ---------- 07 Confirmación ---------- */
-  // Los datos vienen de la reserva recién hecha (el invitado no puede leer pedidos de la base)
+  // Los datos vienen de la reserva recién hecha (así no hay que volver a pedirlos a la base)
   function viewConfirm(r) {
     const o = state.lastOrder;
     if (!o || o.numero !== r.arg) return viewNotFound();
     mount(`<div class="wrap"><div class="done">
       <div class="done__check">${ICON.check}</div>
       <h1>¡Pedido reservado!</h1>
-      <p>Tu pedido <b>${esc(o.numero)}</b> está reservado. Te escribiremos a <b>${esc(o.email)}</b> cuando esté listo para retirar.</p>
+      <p>Tu pedido <strong>${esc(o.numero)}</strong> está reservado. Te escribiremos a <strong>${esc(o.email)}</strong> cuando esté listo para retirar.</p>
       <section class="panel" aria-labelledby="resTitle">
         <h2 id="resTitle">Resumen</h2>
         <dl class="sum">
           <div class="row"><dt>A nombre de</dt><dd>${esc(o.cliente)}</dd></div>
-          <div class="row"><dt>Retiro</dt><dd style="text-align:right">${esc(localTexto())}<br><small>${esc(STORE.local.horario)}</small></dd></div>
+          <div class="row"><dt>Retiro</dt><dd style="text-align:right">${esc(localTexto())}<br><span class="sm">${esc(STORE.local.horario)}</span></dd></div>
           <div class="row"><dt>Retira hasta el</dt><dd>${esc(limiteTexto(o.fecha_limite))}</dd></div>
           <div class="row"><dt>Pago</dt><dd>Al retirar, en el local</dd></div>
+          ${o.subtotal != null ? `<div class="row"><dt>Subtotal</dt><dd>${money(o.subtotal)}</dd></div>` : ""}
+          ${o.descuento ? `<div class="row row--desc"><dt>Descuento${o.codigo ? ` (${esc(o.codigo.code)}, ${o.codigo.pct} %)` : ""}</dt><dd>−${money(o.descuento)}</dd></div>` : ""}
           <div class="row row--total"><dt>Total a pagar</dt><dd>${money(o.total)}</dd></div>
         </dl>
-        <p class="notice notice--small">${ICON.store} Lleva tu número de pedido <b>${esc(o.numero)}</b> al local. Si no te acercas hasta el ${esc(limiteTexto(o.fecha_limite))}, tu reserva se cancelará.</p>
+        <p class="notice notice--small">${ICON.store}<span>Lleva tu número de pedido <strong>${esc(o.numero)}</strong> al local. Si no te acercas hasta el ${esc(limiteTexto(o.fecha_limite))}, tu reserva se cancelará.</span></p>
       </section>
       <div class="actions">
         <a class="btn btn--cafe" href="#/catalogo">Seguir comprando</a>
         ${state.user ? `<a class="btn btn--borde" href="#/pedidos">Ver mis pedidos</a>` : ""}
       </div>
-      ${state.user ? "" : `<p class="hint">Reservaste como invitado: guarda tu número de pedido. <a class="link" href="#/ingresar?tab=crear&next=pedidos">Crea una cuenta</a> para ver tus próximas reservas en «Mis pedidos».</p>`}
     </div></div>`, "Pedido reservado");
   }
 
@@ -942,10 +1114,10 @@
       const n = o.pedido_items.reduce((s, i) => s + i.cantidad, 0);
       const hist = [...o.pedido_estados].sort((a, b) => a.cambiado_en.localeCompare(b.cambiado_en));
       return `<li class="order">
-        <div class="order__head"><h2>Pedido ${esc(o.numero)}</h2><span class="badge badge--${o.estado}">${ESTADO[o.estado]}</span><span>${fmtShort(new Date(o.creado_en))} · <b>${money(Number(o.total))}</b></span></div>
+        <div class="order__head"><h2>Pedido ${esc(o.numero)}</h2><span class="badge badge--${o.estado}">${ESTADO[o.estado]}</span><span>${fmtShort(new Date(o.creado_en))} · <strong>${money(Number(o.total))}</strong></span></div>
         <div class="pics">${o.pedido_items.map(i => { const p = byId(i.producto_id); return p ? `<a href="#/producto/${p.id}"><img src="${p.img}" alt="${esc(i.nombre_producto)}, ${plural(i.cantidad, "unidad", "unidades")}"></a>` : ""; }).join("")}</div>
         <p class="hint">${plural(n, "producto")}${o.codigos_descuento ? ` · código ${esc(o.codigos_descuento.codigo)} (−${money(Number(o.descuento))})` : ""} · pagas al retirar · ${esc(localTexto())}</p>
-        ${o.estado === "reservado" ? `<p class="hint"><b>Retira hasta el ${esc(limiteTexto(o.fecha_limite))}.</b></p>` : ""}
+        ${o.estado === "reservado" ? `<p class="hint"><strong>Retira hasta el ${esc(limiteTexto(o.fecha_limite))}.</strong></p>` : ""}
         <ol class="timeline" aria-label="Historial del pedido ${esc(o.numero)}">${hist.map(h => `<li class="timeline__item timeline__item--${h.estado}">${ESTADO[h.estado]} · ${fmtShort(new Date(h.cambiado_en))}</li>`).join("")}</ol>
         ${o.estado === "reservado" ? `<button type="button" class="btn btn--borde btn--sm" data-action="cancelOrder" data-oid="${o.id}" data-num="${esc(o.numero)}">Cancelar reserva</button>` : ""}
       </li>`;
@@ -966,17 +1138,17 @@
   const INFO = () => ({
     ayuda: ["Ayuda", `<h2>Preguntas frecuentes</h2>
       <dl class="faq">
-        <dt>¿Cómo compro?</dt><dd>Elige una gorra, presiona «Agregar al carrito», abre el carrito y presiona «Reservar pedido». Puedes hacerlo con cuenta o como invitado. Luego retiras y pagas en el local.</dd>
+        <dt>¿Cómo compro?</dt><dd>Elige una gorra, presiona «Agregar al carrito», abre el carrito y presiona «Reservar pedido». Para reservar necesitas una cuenta (puedes crearla o entrar con Google). Te enviamos la confirmación a tu correo y luego retiras y pagas en el local.</dd>
         <dt>¿Qué talla es?</dt><dd>Todas son talla única con ajuste atrás, salvo las marcadas como «Niño».</dd>
         <dt>¿Puedo cambiar mi pedido?</dt><dd>Antes de confirmar, sí: vuelve al carrito y cambia las cantidades. Después, escríbenos a hola@nqcrown.com.</dd>
         <dt>¿Hacen envíos?</dt><dd>No. Todas las compras se retiran y se pagan en el local.</dd>
-        <dt>¿Se guarda mi carrito?</dt><dd>Sí. Con tu cuenta, tu carrito y tus favoritas se guardan y los ves en cualquier dispositivo. Como invitado, el carrito queda guardado en este navegador.</dd>
+        <dt>¿Se guarda mi carrito?</dt><dd>Sí. Con tu cuenta, tu carrito y tus favoritas se guardan y los ves en cualquier dispositivo. Si todavía no ingresas, el carrito queda guardado en este navegador y se suma a tu cuenta al ingresar.</dd>
         <dt>¿Puedo cancelar una reserva?</dt><dd>Sí. Ingresa a tu cuenta, abre «Mis pedidos» y presiona «Cancelar reserva».</dd>
       </dl>`],
-    retiro: ["Retiro en el local", `<p>No hacemos envíos. Reservas en línea y retiras en <b>${esc(localTexto())}</b>.</p>
-      <ul><li><b>Horario:</b> ${esc(STORE.local.horario)}.</li><li>Te avisamos por correo cuando tu pedido está listo.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><b>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</b></li></ul>`],
+    retiro: ["Retiro en el local", `<p>No hacemos envíos. Reservas en línea y retiras en <strong>${esc(localTexto())}</strong>.</p>
+      <ul><li><strong>Horario:</strong> ${esc(STORE.local.horario)}.</li><li>Te avisamos por correo cuando tu pedido está listo.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong></li></ul>`],
     devoluciones: ["Devoluciones", "<p>Tienes 15 días desde que retiras tu pedido para devolverlo en el local. La gorra debe estar sin usar y con sus etiquetas.</p>"],
-    contacto: ["Contacto", "<p>Correo: <b>hola@nqcrown.com</b></p><p>Horario: lunes a sábado, de 9:00 a 18:00.</p>"],
+    contacto: ["Contacto", "<p>Correo: <strong>hola@nqcrown.com</strong></p><p>Horario: lunes a sábado, de 9:00 a 18:00.</p>"],
     accesibilidad: ["Accesibilidad", `<p>Queremos que todas las personas puedan comprar en NQ Crown.</p>
       <h2>Usar la tienda con teclado</h2>
       <ul>
@@ -1029,7 +1201,7 @@
       case "clearfacets": {
         const ch = { p: 1, pr: "" }; FACETS.forEach(fc => { ch[fc.key] = ""; });
         setCatalogQuery(ch, true); $("#catTitle")?.focus();
-        toast("Quitaste todos los filtros");
+        toast("Quitaste todos los filtros", null, "info");
         break;
       }
       case "togglefilters": {
@@ -1042,7 +1214,7 @@
       case "scroll": $("#catalogo-lista").scrollIntoView(); $("#catTitle").focus({ preventScroll: true }); break;
       case "qty": setQty(id, (state.cart[id] || 0) + Number(a.dataset.d)); viewCart(); announce(`${byId(id).nombre}: ${plural(state.cart[id], "unidad", "unidades")}. Total ${money(totals().total)}`); break;
       case "remove": removeItem(id); break;
-      case "pay": go(state.user || state.guest ? "#/checkout" : "#/ingresar?next=checkout"); break;
+      case "pay": go(state.user ? "#/checkout" : "#/ingresar?next=checkout"); break;
       case "reveal": {
         const input = $("#" + a.dataset.for), show = input.type === "password";
         input.type = show ? "text" : "password";
@@ -1072,7 +1244,7 @@
 
   let ready = false; // no pintar pantallas hasta tener el catálogo de la base
   window.addEventListener("hashchange", () => { app.onclickDetail = null; if (ready) render(); });
-  // Carrito del invitado al día entre pestañas (con sesión vive en la base)
+  // Carrito sin sesión al día entre pestañas (con sesión vive en la base)
   window.addEventListener("storage", e => {
     if (e.key === "nqc_cart" && !state.user) { state.cart = load("cart", {}); render(); }
   });
@@ -1094,7 +1266,14 @@
       return;
     }
     ready = true;
+    // Vuelta desde Google: ir a donde estaba (p. ej. la reserva) y saludar, o avisar si Google falló
+    let next = null;
+    try { next = sessionStorage.getItem("nqc_next"); sessionStorage.removeItem("nqc_next"); } catch { /* sin almacenamiento */ }
+    const oauthError = new URLSearchParams(location.search).get("error_description");
+    if (oauthError || next) history.replaceState(null, "", location.pathname + (next && state.user ? "#/" + next : location.hash));
     render();
+    if (oauthError) toast("No pudimos ingresar con Google. Intenta de nuevo o usa tu correo y contraseña.", null, "error");
+    else if (next && state.user) toast(`Hola, ${state.user.nombre.split(" ")[0]}. Ingresaste con Google.`);
   }
 
   // Avisos de Supabase Auth: sesión cerrada en otra pestaña o enlace para cambiar la contraseña.

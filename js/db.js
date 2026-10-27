@@ -43,7 +43,8 @@
     [/already registered|already been registered/i, "Ya existe una cuenta con ese correo. Ingresa con tu contraseña."],
     [/password should be at least/i, "La contraseña debe tener al menos 6 caracteres."],
     [/rate limit|too many/i, "Hiciste demasiados intentos. Espera un minuto y vuelve a probar."],
-    [/failed to fetch|network/i, "No pudimos conectar con la tienda. Revisa tu internet."]
+    [/failed to fetch|network/i, "No pudimos conectar con la tienda. Revisa tu internet."],
+    [/provider is not enabled|unsupported provider/i, "El ingreso con Google todavía no está activado. Ingresa con tu correo y contraseña."]
   ];
   const authMessage = e => (AUTH_MSG.find(([re]) => re.test(e?.message || "")) || [, e?.message || "Algo salió mal. Intenta de nuevo."])[1];
 
@@ -79,6 +80,16 @@
         options: { data: { nombre, apellido }, emailRedirectTo: location.origin + location.pathname }
       }));
     },
+    // Lleva a la pantalla de Google y vuelve a la tienda con la sesión iniciada
+    async ingresarConGoogle() {
+      // Si Google no está activado en Supabase, avisar aquí en vez de ir a una página de error
+      const ajustes = await fetch(URL + "/auth/v1/settings", { headers: { apikey: KEY } }).then(r => r.json());
+      if (!ajustes?.external?.google) throw new Error("provider is not enabled");
+      ok(await sb.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: "select_account" } }
+      }));
+    },
     async salir() {
       ok(await sb.auth.signOut());
     },
@@ -93,6 +104,9 @@
     },
     async guardarTelefono(id, telefono) {
       ok(await sb.from("perfiles").update({ telefono }).eq("id", id));
+    },
+    async actualizarPerfil(id, datos) { // { nombre, apellido, telefono }
+      ok(await sb.from("perfiles").update(datos).eq("id", id));
     },
 
     /* ---------- Favoritos ---------- */
