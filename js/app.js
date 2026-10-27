@@ -1140,7 +1140,7 @@
       <dl class="faq">
         <dt>¿Cómo compro?</dt><dd>Elige una gorra, presiona «Agregar al carrito», abre el carrito y presiona «Reservar pedido». Para reservar necesitas una cuenta (puedes crearla o entrar con Google). Te enviamos la confirmación a tu correo y luego retiras y pagas en el local.</dd>
         <dt>¿Qué talla es?</dt><dd>Todas son talla única con ajuste atrás, salvo las marcadas como «Niño».</dd>
-        <dt>¿Puedo cambiar mi pedido?</dt><dd>Antes de confirmar, sí: vuelve al carrito y cambia las cantidades. Después, escríbenos a hola@nqcrown.com.</dd>
+        <dt>¿Puedo cambiar mi pedido?</dt><dd>Antes de confirmar, sí: vuelve al carrito y cambia las cantidades. Después, escríbenos a isaacquinga2006@gmail.com.</dd>
         <dt>¿Hacen envíos?</dt><dd>No. Todas las compras se retiran y se pagan en el local.</dd>
         <dt>¿Se guarda mi carrito?</dt><dd>Sí. Con tu cuenta, tu carrito y tus favoritas se guardan y los ves en cualquier dispositivo. Si todavía no ingresas, el carrito queda guardado en este navegador y se suma a tu cuenta al ingresar.</dd>
         <dt>¿Puedo cancelar una reserva?</dt><dd>Sí. Ingresa a tu cuenta, abre «Mis pedidos» y presiona «Cancelar reserva».</dd>
@@ -1148,7 +1148,7 @@
     retiro: ["Retiro en el local", `<p>No hacemos envíos. Reservas en línea y retiras en <strong>${esc(localTexto())}</strong>.</p>
       <ul><li><strong>Horario:</strong> ${esc(STORE.local.horario)}.</li><li>Te avisamos por correo cuando tu pedido está listo.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong></li></ul>`],
     devoluciones: ["Devoluciones", "<p>Tienes 15 días desde que retiras tu pedido para devolverlo en el local. La gorra debe estar sin usar y con sus etiquetas.</p>"],
-    contacto: ["Contacto", "<p>Correo: <strong>hola@nqcrown.com</strong></p><p>Horario: lunes a sábado, de 9:00 a 18:00.</p>"],
+    contacto: ["Contacto", "<p>Correo: <strong>isaacquinga2006@gmail.com</strong></p><p>Horario: lunes a sábado, de 9:00 a 18:00.</p>"],
     accesibilidad: ["Accesibilidad", `<p>Queremos que todas las personas puedan comprar en NQ Crown.</p>
       <h2>Usar la tienda con teclado</h2>
       <ul>
