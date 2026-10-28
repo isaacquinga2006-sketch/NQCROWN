@@ -566,3 +566,6 @@ kbd { font: 600 13px var(--cuerpo); border: 1px solid var(--borde-campo); border
 .btn--google { background: var(--blanco); color: #1f1f1f; border-color: #747775; font-weight: 600; }
 .btn--google:hover { background: #f5f5f5; color: #1f1f1f; filter: none; }
 .btn--google .g-logo { width: 20px; height: 20px; stroke: none; }
+
+/* Con muchas páginas los botones bajan de línea (sin desplazamiento horizontal en celular, WCAG 1.4.10) */
+.pager { flex-wrap: wrap; gap: 8px; }
