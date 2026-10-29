@@ -95,7 +95,7 @@
       + `<button type="button" class="toast__close" data-toast="close" aria-label="Cerrar aviso" title="Cerrar aviso">✕</button>`;
     void t.offsetWidth; // reinicia la animación si ya estaba visible
     t.classList.add("show");
-    toastMs = type === "error" ? 9000 : 6000;
+    toastMs = 3000; // se pausa mientras el mouse o el foco están sobre el aviso
     restartToast();
   }
   function hideToast() {
