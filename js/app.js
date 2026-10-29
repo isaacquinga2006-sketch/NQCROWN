@@ -124,7 +124,8 @@
     const before = state.cart[id] || 0;
     state.cart[id] = Math.min(10, before + qty);
     persist(); updateHeader(); syncItem(id);
-    const b = $("#cartBtn"); b.classList.remove("bump"); void b.offsetWidth; b.classList.add("bump");
+    const bump = () => { const b = $("#cartBtn"); b.classList.remove("bump"); void b.offsetWidth; b.classList.add("bump"); };
+    flyToCart(btn && (btn.closest(".card")?.querySelector(".card__img img") || $(".gallery__main img")), bump);
     if (btn) { // el botón confirma la acción por un momento
       const old = btn.innerHTML;
       btn.classList.add("is-done"); btn.innerHTML = `${ICON.check} Agregada`;
@@ -132,6 +133,23 @@
     }
     const msg = before + qty > 10 ? `Máximo 10 unidades de ${p.nombre}` : `${p.nombre} se agregó al carrito (${plural(cartCount(), "producto")})`;
     toast(msg, { label: "Ver carrito", run: () => go("#/carrito") }, before + qty > 10 ? "info" : "ok");
+  }
+  // Una copia de la foto viaja hasta el carrito; sin foto o con «reducir movimiento» solo salta el carrito
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  function flyToCart(img, done) {
+    const cart = $("#cartBtn");
+    if (!img || reduceMotion.matches || !img.animate) return done();
+    const from = img.getBoundingClientRect(), to = cart.getBoundingClientRect();
+    const fly = img.cloneNode(); fly.className = "fly"; fly.alt = ""; fly.setAttribute("aria-hidden", "true");
+    const size = Math.min(from.width, 120);
+    Object.assign(fly.style, { left: `${from.left + (from.width - size) / 2}px`, top: `${from.top + (from.height - size) / 2}px`, width: `${size}px`, height: `${size}px` });
+    document.body.append(fly);
+    const dx = to.left + to.width / 2 - (from.left + from.width / 2), dy = to.top + to.height / 2 - (from.top + from.height / 2);
+    fly.animate([
+      { transform: "translate(0, 0) scale(1)", opacity: 1 },
+      { transform: `translate(${dx * .5}px, ${dy * .5 - 60}px) scale(.6)`, opacity: .9, offset: .5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(.15)`, opacity: .4 }
+    ], { duration: 550, easing: "ease-in" }).finished.then(() => { fly.remove(); done(); });
   }
   function setQty(id, qty) {
     if (qty <= 0) delete state.cart[id]; else state.cart[id] = Math.min(10, qty);
@@ -247,8 +265,13 @@
   document.addEventListener("click", e => { if (!e.target.closest("#account")) closeAccountMenu(); });
 
   // Pinta la pantalla, cambia el título de la pestaña y lleva el foco al título (lectores de pantalla).
+  let lastPage = "";
   function mount(html, title) {
     app.innerHTML = html;
+    // Entrada suave solo al cambiar de pantalla (no al filtrar o paginar); tarjetas en cascada
+    const page = location.hash.split("?")[0];
+    if (page !== lastPage) { lastPage = page; app.classList.remove("page-in"); void app.offsetWidth; app.classList.add("page-in"); }
+    $$(".card", app).forEach((c, i) => c.style.setProperty("--i", Math.min(i, 12)));
     document.title = title ? `${title} · NQ Crown` : "NQ Crown · Gorras con carácter";
     if (document.activeElement === $("#searchInput")) return; // escribiendo en el buscador
     window.scrollTo(0, 0);
@@ -1200,6 +1223,7 @@
         const on = toggleFav(id);
         if (on === null) break;
         paintFav(id, on);
+        if (on) { a.classList.remove("beat"); void a.offsetWidth; a.classList.add("beat"); }
         const r = parseHash();
         if (r.name === "catalogo" && r.q.get("f") === "fav") render();
         break;
@@ -1264,7 +1288,9 @@
 
   /* ---------- Inicio: catálogo, local y sesión desde la base ---------- */
   async function init() {
-    app.innerHTML = `<div class="wrap section"><p class="hint" role="status">Cargando la tienda…</p></div>`;
+    // Tarjetas grises con brillo mientras llega el catálogo
+    app.innerHTML = `<div class="wrap section"><p class="sr-only" role="status">Cargando la tienda…</p>
+      <div class="grid" aria-hidden="true">${'<div class="skel"><span></span><span></span><span></span><span></span></div>'.repeat(8)}</div></div>`;
     try {
       const [productos, local, ratings] = await Promise.all([DB.productos(), DB.local(), DB.calificaciones()]);
       if (productos.length) PRODUCTS = productos;
