@@ -771,14 +771,21 @@
           const res = isIn ? await DB.ingresar(v.email, v.pass) : await DB.crearCuenta(v.email, v.pass, v.nombre, v.apellido);
           if (!res.session) { // el proyecto pide confirmar el correo antes de entrar
             delete form.dataset.busy; btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = "Crear cuenta";
+            // Supabase no avisa si el correo ya tenía cuenta: devuelve un usuario sin identidades
+            if (res.user && !res.user.identities?.length) return fail("Ya existe una cuenta con ese correo. Ingresa con tu contraseña.");
             const sum = $("#errSum"); sum.hidden = false; sum.classList.add("errsum--ok");
-            sum.innerHTML = `<h2>${ICON.check} Revisa tu correo</h2><p>Te enviamos un enlace a <strong>${esc(v.email)}</strong>. Ábrelo para activar tu cuenta y luego ingresa.</p>`;
+            sum.innerHTML = `<h2>${ICON.check} Revisa tu correo</h2><p>Te enviamos un enlace de confirmación a <strong>${esc(v.email)}</strong>. Ábrelo para activar tu cuenta y después ingresa con tu contraseña. Si no llega en unos minutos, revisa la carpeta de spam.</p><p><button type="button" class="link" data-action="resend" data-email="${esc(v.email)}">Reenviar el correo</button></p>`;
             sum.focus();
             return;
           }
           await loadUser(res.session);
         } catch (err) {
           console.error(err);
+          if (isIn && /email not confirmed/i.test(err?.message || "")) {
+            fail(DB.authMessage(err));
+            $("#errSum").insertAdjacentHTML("beforeend", `<p>¿No te llegó? <button type="button" class="link" data-action="resend" data-email="${esc(v.email)}">Reenviar el correo de confirmación</button></p>`);
+            return;
+          }
           return fail(DB.authMessage(err));
         }
         toast(!isIn ? `¡Listo, ${state.user.nombre.split(" ")[0]}! Tu cuenta fue creada.` : `Hola de nuevo, ${state.user.nombre.split(" ")[0]}`);
@@ -792,6 +799,12 @@
         try { sessionStorage.setItem("nqc_next", next); } catch { /* sin almacenamiento */ }
         try { await DB.ingresarConGoogle(); } // la página se va a Google y vuelve con la sesión
         catch (err) { console.error(err); a.disabled = false; a.classList.remove("is-loading"); toast(DB.authMessage(err), null, "error"); }
+      }
+      if (a.dataset.action === "resend") {
+        a.disabled = true;
+        try { await DB.reenviarConfirmacion(a.dataset.email); toast(`Te reenviamos el correo de confirmación a ${a.dataset.email}`); }
+        catch (err) { console.error(err); toast(DB.authMessage(err), null, "error"); }
+        a.disabled = false;
       }
       if (a.dataset.action === "forgot") {
         const email = $("#f_email").value.trim();
@@ -1269,10 +1282,21 @@
     // Vuelta desde Google: ir a donde estaba (p. ej. la reserva) y saludar, o avisar si Google falló
     let next = null;
     try { next = sessionStorage.getItem("nqc_next"); sessionStorage.removeItem("nqc_next"); } catch { /* sin almacenamiento */ }
-    const oauthError = new URLSearchParams(location.search).get("error_description");
-    if (oauthError || next) history.replaceState(null, "", location.pathname + (next && state.user ? "#/" + next : location.hash));
+    const oauthError = DB.enlace.error;
+    // Vuelta desde el enlace de confirmación del correo: no viene de Google ni del cambio de contraseña,
+    // y si abrió sesión, la confirmación es de hace pocos minutos
+    const sesion = state.user ? await DB.sesion() : null;
+    const recien = !sesion || Date.now() - new Date(sesion.user.email_confirmed_at || 0) < 15 * 60 * 1000;
+    const confirmo = !next && parseHash().name !== "nueva-clave" && recien && (DB.enlace.code || oauthError);
+    if (oauthError || next || DB.enlace.code) {
+      const hash = next && state.user ? "#/" + next : confirmo && !state.user && !oauthError ? "#/ingresar" : location.hash;
+      history.replaceState(null, "", location.pathname + hash);
+    }
     render();
-    if (oauthError) toast("No pudimos ingresar con Google. Intenta de nuevo o usa tu correo y contraseña.", null, "error");
+    if (confirmo && oauthError) toast("El enlace de confirmación ya venció o ya se usó. Ingresa, y si hace falta te reenviamos otro.", null, "error");
+    else if (confirmo && state.user) toast(`¡Correo confirmado! Bienvenido, ${state.user.nombre.split(" ")[0]}.`);
+    else if (confirmo) toast("¡Correo confirmado! Ahora ingresa con tu correo y contraseña.");
+    else if (oauthError) toast("No pudimos ingresar con Google. Intenta de nuevo o usa tu correo y contraseña.", null, "error");
     else if (next && state.user) toast(`Hola, ${state.user.nombre.split(" ")[0]}. Ingresaste con Google.`);
   }
 

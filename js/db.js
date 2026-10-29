@@ -7,6 +7,10 @@
   const URL = "https://nrvfrmehaudwpikbwznm.supabase.co";
   const KEY = "sb_publishable_WHBScLKZTom79NI6EMwBNg_Y9LEDJdX";
 
+  // Se lee antes de crear el cliente, que canjea el ?code= del enlace del correo o de Google
+  const urlInicial = new URLSearchParams(location.search);
+  const enlace = { code: urlInicial.has("code"), error: urlInicial.get("error_description") };
+
   const sb = window.supabase.createClient(URL, KEY, {
     auth: { flowType: "pkce", persistSession: true, detectSessionInUrl: true }
   });
@@ -51,6 +55,7 @@
   window.DB = {
     sb,
     authMessage,
+    enlace,
 
     /* ---------- Catálogo y tienda ---------- */
     async productos() {
@@ -79,6 +84,10 @@
         email, password,
         options: { data: { nombre, apellido }, emailRedirectTo: location.origin + location.pathname }
       }));
+    },
+    // Vuelve a mandar el correo para confirmar la cuenta
+    async reenviarConfirmacion(email) {
+      ok(await sb.auth.resend({ type: "signup", email, options: { emailRedirectTo: location.origin + location.pathname } }));
     },
     // Lleva a la pantalla de Google y vuelve a la tienda con la sesión iniciada
     async ingresarConGoogle() {
