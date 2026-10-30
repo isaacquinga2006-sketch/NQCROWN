@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=22">
+  <link rel="stylesheet" href="css/styles.css?v=23">
 </head>
 <body>
   <!-- Primer elemento al presionar Tab: salta el menú (WCAG 2.4.1) -->
@@ -97,11 +97,15 @@
   </div>
   <div class="sr-only" id="srLive" aria-live="polite"></div>
 
+  <!-- Carrito lateral (prueba): se abre al agregar una gorra -->
+  <div class="drawer-bg" id="drawerBg" hidden></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" hidden></aside>
+
   <noscript><p class="wrap">Esta tienda necesita JavaScript activado para funcionar.</p></noscript>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="js/data.js?v=8"></script>
   <script src="js/db.js?v=15"></script>
-  <script src="js/app.js?v=21"></script>
+  <script src="js/app.js?v=22"></script>
 </body>
 </html>

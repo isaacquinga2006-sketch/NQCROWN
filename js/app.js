@@ -151,8 +151,62 @@
     }
     const ver = { label: "Ver carrito", run: () => go("#/carrito") };
     if (before + qty > 10) toastGorra("Máximo 10 unidades por gorra", p, talla, ver, "info");
-    else toastGorra(`Agregada al carrito · ${plural(cartCount(), "producto")}`, p, talla, ver);
+    else setTimeout(() => openDrawer(key, btn), reduceMotion.matches ? 0 : 560); // después de que la foto llega al carrito
   }
+
+  /* ---------- Carrito lateral (prueba) ---------- */
+  // Diálogo al costado con lo que hay en el carrito. Esc, ✕, «Seguir comprando» o clic afuera lo cierran
+  // y el foco vuelve al botón que lo abrió. Tab no sale del panel mientras está abierto.
+  let drawerOpener = null;
+  function openDrawer(nuevaKey, opener) {
+    const d = $("#drawer"), items = cartItems(), t = totals();
+    drawerOpener = opener || document.activeElement;
+    d.innerHTML = `<div class="drawer__head">
+        <h2 id="drawerTitle" tabindex="-1">Tu carrito <span class="sm">(${plural(cartCount(), "producto")})</span></h2>
+        <button type="button" class="drawer__x" data-drawer="close" aria-label="Cerrar carrito" title="Cerrar carrito">✕</button>
+      </div>
+      <ul class="drawer__list">${items.map(({ key, p, talla, qty }) => `<li class="drawer__item ${key === nuevaKey ? "is-new" : ""}">
+        <img src="${p.img}" alt="">
+        <div><a href="#/producto/${p.id}">${esc(p.nombre)}</a>
+          <span class="sm">${talla ? `Talla ${esc(talla)} · ` : ""}${plural(qty, "unidad", "unidades")}</span>
+          ${key === nuevaKey ? `<span class="drawer__new">${ICON.check} Recién agregada</span>` : ""}</div>
+        <strong>${money(p.precio * qty)}</strong>
+      </li>`).join("")}</ul>
+      <div class="drawer__foot">
+        <div class="drawer__sum"><span>Subtotal</span><strong>${money(t.subtotal)}</strong></div>
+        <p class="hint">Retiras y pagas en el local. El descuento se aplica en el carrito.</p>
+        <button type="button" class="btn btn--verde btn--block" data-drawer="pay">Reservar pedido</button>
+        <a class="btn btn--borde btn--block" href="#/carrito" data-drawer="cart">Ver carrito completo</a>
+        <button type="button" class="link drawer__keep" data-drawer="close">Seguir comprando</button>
+      </div>`;
+    d.hidden = false; $("#drawerBg").hidden = false;
+    document.body.classList.add("has-drawer");
+    requestAnimationFrame(() => { d.classList.add("open"); $("#drawerBg").classList.add("open"); });
+    $("#drawerTitle").focus();
+  }
+  function closeDrawer(returnFocus = true) {
+    const d = $("#drawer");
+    if (d.hidden) return;
+    d.classList.remove("open"); $("#drawerBg").classList.remove("open");
+    document.body.classList.remove("has-drawer");
+    setTimeout(() => { d.hidden = true; $("#drawerBg").hidden = true; d.innerHTML = ""; }, reduceMotion.matches ? 0 : 250);
+    if (returnFocus && drawerOpener?.isConnected) drawerOpener.focus();
+  }
+  $("#drawer").addEventListener("click", e => {
+    const b = e.target.closest("[data-drawer], a");
+    if (!b) return;
+    if (b.dataset.drawer === "pay") { closeDrawer(false); go(state.user ? "#/checkout" : "#/ingresar?next=checkout"); }
+    else closeDrawer(b.dataset.drawer === "close");
+  });
+  $("#drawerBg").addEventListener("click", () => closeDrawer());
+  $("#drawer").addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.stopPropagation(); closeDrawer(); }
+    if (e.key !== "Tab") return;
+    const f = $$("a, button", $("#drawer")), first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === $("#drawerTitle"))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  window.addEventListener("hashchange", () => closeDrawer(false));
   // Una copia de la foto viaja hasta el carrito; sin foto o con «reducir movimiento» solo salta el carrito
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
   function flyToCart(img, done) {
