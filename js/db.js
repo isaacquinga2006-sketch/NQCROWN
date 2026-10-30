@@ -20,8 +20,13 @@
 
   // Fila de la base → misma forma que usaba data.js
   const toProduct = r => {
-    const foto = [...(r.producto_imagenes || [])].sort((a, b) => a.orden - b.orden)[0] || {};
+    const fotos = [...(r.producto_imagenes || [])].sort((a, b) => a.orden - b.orden);
+    const foto = fotos[0] || {};
     return {
+      imgs: fotos.map(f => ({ url: f.url, alt: f.texto_alt || r.nombre })),
+      liga: r.equipos ? r.equipos.liga : null,
+      logo: r.equipos ? r.equipos.logo_url : null,
+      talla: r.sistema_talla, // null, «fitted», «juvenil» o «stretch»
       id: r.id,
       nombre: r.nombre,
       modelo: r.modelo,
@@ -50,19 +55,32 @@
     [/failed to fetch|network/i, "No pudimos conectar con la tienda. Revisa tu internet."],
     [/provider is not enabled|unsupported provider/i, "El ingreso con Google todavía no está activado. Ingresa con tu correo y contraseña."]
   ];
+  // Línea del carrito: «12» (sin talla) o «12|7 1/4» (gorra y talla)
+  const cartKey = (id, talla) => talla ? `${id}|${talla}` : String(id);
+  const splitKey = k => { const i = String(k).indexOf("|"); return i < 0 ? [Number(k), ""] : [Number(k.slice(0, i)), k.slice(i + 1)]; };
+
   const authMessage = e => (AUTH_MSG.find(([re]) => re.test(e?.message || "")) || [, e?.message || "Algo salió mal. Intenta de nuevo."])[1];
 
   window.DB = {
     sb,
     authMessage,
     enlace,
+    cartKey,
+    splitKey,
 
     /* ---------- Catálogo y tienda ---------- */
     async productos() {
       const rows = ok(await sb.from("productos")
-        .select("id, nombre, modelo, descripcion, detalles, precio, precio_antes, es_nueva, stock, tipos(nombre), marcas(nombre), equipos(nombre), colores(nombre), producto_imagenes(url, texto_alt, orden)")
+        .select("id, nombre, modelo, descripcion, detalles, precio, precio_antes, es_nueva, stock, sistema_talla, tipos(nombre), marcas(nombre), equipos(nombre, liga, logo_url), colores(nombre), producto_imagenes(url, texto_alt, orden)")
         .order("id"));
       return rows.map(toProduct);
+    },
+    async tipos() { // [{ nombre, descripcion }] para el menú y la guía de modelos
+      return ok(await sb.from("tipos").select("nombre, descripcion").order("id"));
+    },
+    async tallas() { // { fitted: [{ etiqueta, medida }], juvenil: [...], stretch: [...] }
+      const rows = ok(await sb.from("tallas").select("sistema, etiqueta, medida").order("sistema").order("orden"));
+      return rows.reduce((m, t) => ((m[t.sistema] ||= []).push({ etiqueta: t.etiqueta, medida: t.medida }), m), {});
     },
     async local() {
       const rows = ok(await sb.from("locales").select("id, nombre, direccion, enlace_mapa, horario").order("id").limit(1));
@@ -130,22 +148,34 @@
 
     /* ---------- Carrito (solo con sesión; el invitado lo guarda en el navegador) ---------- */
     async carrito() {
-      const rows = ok(await sb.from("carrito_items").select("producto_id, cantidad"));
-      return Object.fromEntries(rows.map(r => [r.producto_id, r.cantidad]));
+      const rows = ok(await sb.from("carrito_items").select("producto_id, talla, cantidad"));
+      return Object.fromEntries(rows.map(r => [cartKey(r.producto_id, r.talla), r.cantidad]));
     },
-    async guardarItem(usuario_id, producto_id, cantidad) {
+    async guardarItem(usuario_id, key, cantidad) {
+      const [producto_id, talla] = splitKey(key);
       ok(cantidad > 0
-        ? await sb.from("carrito_items").upsert({ usuario_id, producto_id, cantidad, actualizado_en: new Date().toISOString() })
-        : await sb.from("carrito_items").delete().eq("usuario_id", usuario_id).eq("producto_id", producto_id));
+        ? await sb.from("carrito_items").upsert({ usuario_id, producto_id, talla, cantidad, actualizado_en: new Date().toISOString() })
+        : await sb.from("carrito_items").delete().eq("usuario_id", usuario_id).eq("producto_id", producto_id).eq("talla", talla));
     },
     async guardarCarrito(usuario_id, cart) {
-      const rows = Object.entries(cart).map(([producto_id, cantidad]) => ({ usuario_id, producto_id: Number(producto_id), cantidad }));
+      const rows = Object.entries(cart).map(([key, cantidad]) => { const [producto_id, talla] = splitKey(key); return { usuario_id, producto_id, talla, cantidad }; });
       if (rows.length) ok(await sb.from("carrito_items").upsert(rows));
+    },
+
+    /* ---------- Avísame cuando vuelva (gorras agotadas) ---------- */
+    async misAvisos() {
+      return ok(await sb.from("avisos_stock").select("producto_id").is("notificado_en", null)).map(r => r.producto_id);
+    },
+    async pedirAviso(producto_id, correo) {
+      ok(await sb.from("avisos_stock").upsert({ producto_id, correo }, { onConflict: "producto_id,usuario_id", ignoreDuplicates: true }));
+    },
+    async quitarAviso(usuario_id, producto_id) {
+      ok(await sb.from("avisos_stock").delete().eq("usuario_id", usuario_id).eq("producto_id", producto_id));
     },
 
     /* ---------- Reservas ---------- */
     async reservar(datos, cart, codigo, localId) {
-      const items = Object.entries(cart).map(([producto_id, cantidad]) => ({ producto_id: Number(producto_id), cantidad }));
+      const items = Object.entries(cart).map(([key, cantidad]) => { const [producto_id, talla] = splitKey(key); return { producto_id, talla, cantidad }; });
       const rows = ok(await sb.rpc("crear_reserva", {
         p_nombre: datos.nombre, p_apellido: datos.apellido, p_correo: datos.email, p_telefono: datos.telefono,
         p_local_id: localId, p_items: items, p_codigo: codigo || null
@@ -154,7 +184,7 @@
     },
     async pedidos() {
       return ok(await sb.from("pedidos")
-        .select("id, numero, nombre, apellido, correo, subtotal, descuento, total, estado, fecha_limite, creado_en, codigos_descuento(codigo), pedido_items(producto_id, nombre_producto, precio_unitario, cantidad), pedido_estados(estado, cambiado_en)")
+        .select("id, numero, nombre, apellido, correo, subtotal, descuento, total, estado, fecha_limite, creado_en, codigos_descuento(codigo), pedido_items(producto_id, nombre_producto, precio_unitario, cantidad, talla), pedido_estados(estado, cambiado_en)")
         .order("creado_en", { ascending: false }));
     },
     async cancelarReserva(pedidoId) {

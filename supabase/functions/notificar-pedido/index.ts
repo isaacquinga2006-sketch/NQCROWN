@@ -19,7 +19,7 @@ type Pedido = {
   numero: string; nombre: string; subtotal: number; descuento: number; total: number; fecha_limite: string;
   codigos_descuento: { codigo: string; porcentaje: number } | null;
   locales: { nombre: string; direccion: string; horario: string } | null;
-  pedido_items: { nombre_producto: string; precio_unitario: number; cantidad: number }[];
+  pedido_items: { nombre_producto: string; precio_unitario: number; cantidad: number; talla: string | null }[];
 };
 
 // Asunto, título y párrafo de cada tipo de aviso
@@ -46,7 +46,7 @@ function correoHTML(tipo: string, p: Pedido) {
   const t = textos(tipo, p);
   const local = p.locales;
   const filas = p.pedido_items.map(i => `<tr>
-      <td style="padding:8px 0;border-bottom:1px solid #E6DBC8">${esc(i.nombre_producto)} × ${i.cantidad}</td>
+      <td style="padding:8px 0;border-bottom:1px solid #E6DBC8">${esc(i.nombre_producto)}${i.talla ? ` (talla ${esc(i.talla)})` : ""} × ${i.cantidad}</td>
       <td style="padding:8px 0;border-bottom:1px solid #E6DBC8;text-align:right">${money(i.precio_unitario * i.cantidad)}</td></tr>`).join("");
   const desc = Number(p.descuento) > 0
     ? `<tr><td style="padding:4px 0;color:#2F6B4F">Descuento${p.codigos_descuento ? ` (${esc(p.codigos_descuento.codigo)}, ${p.codigos_descuento.porcentaje} %)` : ""}</td><td style="padding:4px 0;text-align:right;color:#2F6B4F">−${money(p.descuento)}</td></tr>` : "";
@@ -75,7 +75,7 @@ function correoHTML(tipo: string, p: Pedido) {
 
 function correoTexto(tipo: string, p: Pedido) {
   const t = textos(tipo, p);
-  const items = p.pedido_items.map(i => `- ${i.nombre_producto} x ${i.cantidad}: ${money(i.precio_unitario * i.cantidad)}`).join("\n");
+  const items = p.pedido_items.map(i => `- ${i.nombre_producto}${i.talla ? ` (talla ${i.talla})` : ""} x ${i.cantidad}: ${money(i.precio_unitario * i.cantidad)}`).join("\n");
   return `${t.titulo}\n\nHola, ${p.nombre}. ${t.parrafo.replace(/<[^>]+>/g, "")}\n\n${items}\nSubtotal: ${money(p.subtotal)}\n`
     + (Number(p.descuento) > 0 ? `Descuento: -${money(p.descuento)}\n` : "")
     + `Total a pagar en el local: ${money(p.total)}\n\nVer mis pedidos: ${TIENDA}#/pedidos\n`;
@@ -96,7 +96,7 @@ Deno.serve(async req => {
   if (!n) return json({ ok: true, omitida: true });
 
   const { data: p, error } = await sb.from("pedidos")
-    .select("numero, nombre, subtotal, descuento, total, fecha_limite, codigos_descuento(codigo, porcentaje), locales(nombre, direccion, horario), pedido_items(nombre_producto, precio_unitario, cantidad)")
+    .select("numero, nombre, subtotal, descuento, total, fecha_limite, codigos_descuento(codigo, porcentaje), locales(nombre, direccion, horario), pedido_items(nombre_producto, precio_unitario, cantidad, talla)")
     .eq("id", n.pedido_id).single();
   if (error || !p) { await marcar(n.id, "error", "No se encontró el pedido"); return json({ error: "Pedido no encontrado" }, 404); }
 

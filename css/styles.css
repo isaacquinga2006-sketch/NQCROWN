@@ -435,7 +435,7 @@ kbd { font: 600 13px var(--cuerpo); border: 1px solid var(--borde-campo); border
 .footer nav a, .crumbs a, .account__link { display: inline-block; min-height: 24px; padding: 3px 0; }
 /* WCAG 2.4.11: en pantallas chicas el encabezado ocupa mucho alto; deja de ser fijo para no tapar el foco */
 @media (max-width: 53.75rem) {
-  .topbar { position: static; }
+  .topbar { position: relative; } /* sin fijar, pero los menús desplegables se ubican debajo */
   html { scroll-padding-top: 16px; }
   .panel, .filters { top: 16px; }
 }
@@ -582,3 +582,81 @@ kbd { font: 600 13px var(--cuerpo); border: 1px solid var(--borde-campo); border
 
 /* Con muchas páginas los botones bajan de línea (sin desplazamiento horizontal en celular, WCAG 1.4.10) */
 .pager { flex-wrap: wrap; gap: 8px; }
+
+/* ---------- Menús desplegables: equipos por liga y modelos ---------- */
+.mainnav { align-items: center; }
+.mainnav__btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 0; border: 0; border-bottom: 2px solid transparent; background: none; color: inherit; font: inherit; opacity: .85; cursor: pointer; }
+.mainnav__btn:hover, .mainnav__btn[aria-expanded="true"] { opacity: 1; border-color: var(--beige); }
+.mainnav__btn svg { width: 14px; fill: none; stroke: currentColor; stroke-width: 2.5; transition: transform .2s; }
+.mainnav__btn[aria-expanded="true"] svg { transform: rotate(180deg); }
+.mega { position: absolute; left: 0; right: 0; top: 100%; z-index: 25; background: var(--blanco); color: var(--texto); border-bottom: 3px solid var(--beige); box-shadow: 0 18px 40px rgba(36, 24, 18, .18); max-height: min(70vh, 34rem); overflow: auto; animation: rise .2s ease-out; }
+.mega__in { padding: 22px 0 26px; }
+.mega__cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 8px 28px; }
+.mega__col h3 { font: 700 13px var(--cuerpo); text-transform: uppercase; letter-spacing: .06em; color: var(--suave); margin: 0 0 8px; padding-bottom: 6px; border-bottom: 1.5px solid var(--beige-claro); }
+.mega ul { list-style: none; margin: 0; padding: 0; }
+.mega__col a { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 8px; margin: 0 -8px; border-radius: 8px; color: var(--texto); text-decoration: none; font-weight: 500; }
+.mega__col a .sm { margin-left: auto; color: var(--suave); }
+.mega a:hover { background: var(--crema); color: var(--cafe); }
+.mega a:focus-visible { outline-color: var(--morado); box-shadow: none; }
+.tlogo { width: 28px; height: 28px; object-fit: contain; flex: none; }
+.tlogo--txt { display: grid; place-items: center; border-radius: 50%; background: var(--cafe); color: var(--crema); font-size: 10px; font-weight: 700; }
+.mega__models { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 8px 20px; }
+.mega__models a { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; color: var(--texto); text-decoration: none; border: 1.5px solid var(--beige-claro); height: 100%; }
+.mega__models a .sm { color: var(--suave); font-weight: 400; }
+.mega__guide a { background: var(--cafe); border-color: var(--cafe); color: var(--crema); }
+.mega__guide a .sm { color: var(--beige-claro); }
+.mega .mega__guide a:hover { background: #3a2318; color: var(--blanco); }
+
+/* ---------- Tarjeta: otra foto al pasar el mouse y gorra agotada ---------- */
+.card__img2 { position: absolute; inset: 0; opacity: 0; transition: opacity .25s; background: var(--blanco); }
+.card:hover .card__img--swap .card__img2 { opacity: 1; }
+.tag--agotada { background: var(--suave); color: var(--blanco); }
+.card--agotada .card__img > a > img:first-child { opacity: .55; }
+
+/* ---------- Detalle: galería con varias fotos y tallas ---------- */
+.gallery__main { position: relative; }
+.gallery__nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid var(--beige); background: rgba(255, 255, 255, .92); color: var(--cafe); font-size: 24px; line-height: 1; display: grid; place-items: center; padding: 0 0 3px; }
+.gallery__nav--prev { left: 10px; }
+.gallery__nav--next { right: 10px; }
+.gallery__nav:hover { background: var(--blanco); border-color: var(--cafe); }
+.gallery__count { position: absolute; bottom: 10px; right: 12px; padding: 2px 10px; border-radius: 10px; background: rgba(36, 24, 18, .75); color: var(--blanco); font-size: 12px; font-weight: 600; }
+.thumbs { grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr)); gap: 10px; }
+.sizes { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+.sizes legend { font-weight: 600; font-size: 14px; padding: 0; margin-bottom: 4px; }
+.sizes .hint { margin-bottom: 10px; }
+.sizes__opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.size { position: relative; }
+.size input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.size > span { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 4.4rem; min-height: 48px; padding: 4px 10px; border: 1.5px solid var(--borde-campo); border-radius: 8px; background: var(--blanco); font-weight: 700; color: var(--texto); line-height: 1.2; }
+.size > span .sm { font-weight: 400; color: var(--suave); font-size: 11px; }
+.size input:hover + span { border-color: var(--cafe); }
+.size input:checked + span { background: var(--cafe); border-color: var(--cafe); color: var(--blanco); }
+.size input:checked + span .sm { color: var(--beige-claro); }
+.size input:focus-visible + span { outline: 3px solid var(--morado); outline-offset: 2px; }
+.sizes.bad .size > span { border-color: var(--rojo); }
+.sizes .msg { color: var(--rojo); font-size: 13px; display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.sizes .msg svg { width: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.hint--low { color: var(--rojo); font-weight: 600; }
+.line__size { display: inline-block; margin: 2px 0; padding: 1px 8px; border-radius: 8px; background: var(--beige-claro); color: var(--cafe); font-size: 12px; font-weight: 700; }
+
+/* ---------- Guía de modelos y tallas ---------- */
+.guide { max-width: 60rem; background: var(--blanco); border: 1.5px solid var(--beige); border-radius: var(--radio); padding: 28px 32px; color: var(--texto); margin-bottom: 40px; }
+.guide h2 { font: 700 20px var(--titulo); margin: 28px 0 12px; color: var(--cafe); }
+.guide .lead { color: var(--suave); margin-top: 0; }
+.guide__models { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 14px; }
+.gmodel { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 1.5px solid var(--beige-claro); border-radius: 10px; }
+.gmodel img { width: 84px; height: 70px; object-fit: contain; flex: none; }
+.gmodel h3 { margin: 0 0 2px; font-size: 16px; }
+.gmodel p { margin: 0 0 6px; font-size: 13px; color: var(--suave); }
+.guide__steps { padding-left: 22px; }
+.guide__steps li { margin-bottom: 6px; }
+.sizetables { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 18px; align-items: start; margin: 18px 0; }
+.sizetable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sizetable caption { text-align: left; font-weight: 700; color: var(--cafe); padding-bottom: 6px; }
+.sizetable caption .sm { display: block; font-weight: 400; color: var(--suave); }
+.sizetable th, .sizetable td { padding: 6px 10px; border-bottom: 1px solid var(--beige-claro); text-align: left; }
+.sizetable thead th { background: var(--crema); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+@media (max-width: 53.75rem) {
+  .mainnav { gap: 16px; flex-wrap: wrap; }
+  .guide { padding: 20px 16px; }
+}

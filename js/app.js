@@ -7,6 +7,7 @@
 
   const DB = window.DB;
   let PRODUCTS = window.PRODUCTS; // se reemplaza por el catálogo de la base al iniciar
+  let TIPOS = [], TALLAS = {};    // guía de modelos y tablas de tallas (de la base)
   const STORE = window.STORE;
   const byId = id => PRODUCTS.find(p => p.id === Number(id));
   const $ = (s, el = document) => el.querySelector(s);
@@ -36,8 +37,9 @@
 
   // Sin sesión el carrito queda en el navegador; con sesión, carrito y favoritas vienen de la base.
   const state = {
-    cart: load("cart", {}),          // { idProducto: cantidad }
+    cart: load("cart", {}),          // { "idProducto" o "idProducto|talla": cantidad }
     favs: [],                        // [idProducto], solo con sesión
+    avisos: [],                      // [idProducto] agotadas con «Avísame cuando vuelva»
     user: null,                      // { id, nombre, apellido, email, telefono }
     coupon: (c => c && c.pct ? c : null)(load("coupon", null)), // { code, pct } validado en la base
     lastOrder: load("lastOrder", null), // última reserva (para la pantalla de confirmación)
@@ -51,8 +53,12 @@
   const dbError = (e, msg = "No pudimos guardar el cambio. Revisa tu conexión e intenta de nuevo.") => { console.error(e); toast(msg, null, "error"); };
 
   const cartItems = () => Object.entries(state.cart)
-    .map(([id, qty]) => ({ p: byId(id), qty }))
+    .map(([key, qty]) => { const [id, talla] = DB.splitKey(key); return { key, p: byId(id), talla, qty }; })
     .filter(i => i.p && i.qty > 0);
+  const inCartOf = id => cartItems().filter(i => i.p.id === id).reduce((n, i) => n + i.qty, 0);
+  const tallaTexto = t => t ? ` · talla ${t}` : "";
+  // Todas las fotos de la gorra (las del catálogo de respaldo solo tienen una)
+  const fotos = p => p.imgs?.length ? p.imgs : [{ url: p.img, alt: p.alt }];
   const cartCount = () => cartItems().reduce((n, i) => n + i.qty, 0);
 
   function totals() {
@@ -66,11 +72,12 @@
 
   // Datos de la cuenta: perfil, favoritas y carrito. El carrito armado sin sesión se suma al de la cuenta.
   async function loadUser(session) {
-    if (!session) { state.user = null; state.favs = []; return; }
+    if (!session) { state.user = null; state.favs = []; state.avisos = []; return; }
     const u = session.user;
-    const [perfil, favs, cart] = await Promise.all([DB.perfil(u.id), DB.favoritos(), DB.carrito()]);
+    const [perfil, favs, cart, avisos] = await Promise.all([DB.perfil(u.id), DB.favoritos(), DB.carrito(), DB.misAvisos()]);
     state.user = { id: u.id, email: u.email, nombre: perfil?.nombre || u.email.split("@")[0], apellido: perfil?.apellido || "", telefono: perfil?.telefono || "" };
     state.favs = favs;
+    state.avisos = avisos;
     const local = load("cart", {});
     Object.entries(local).forEach(([id, q]) => { cart[id] = Math.min(10, (cart[id] || 0) + q); });
     if (Object.keys(local).length) await DB.guardarCarrito(u.id, cart);
@@ -119,11 +126,11 @@
   // Anuncio solo para lectores de pantalla (cambios que no tienen aviso visible).
   const announce = msg => { const r = $("#srLive"); r.textContent = ""; setTimeout(() => { r.textContent = msg; }, 60); };
 
-  function addToCart(id, qty = 1, btn) {
-    const p = byId(id);
-    const before = state.cart[id] || 0;
-    state.cart[id] = Math.min(10, before + qty);
-    persist(); updateHeader(); syncItem(id);
+  function addToCart(id, qty = 1, btn, talla = "") {
+    const p = byId(id), key = DB.cartKey(id, talla);
+    const before = state.cart[key] || 0;
+    state.cart[key] = Math.min(10, before + qty);
+    persist(); updateHeader(); syncItem(key);
     const bump = () => { const b = $("#cartBtn"); b.classList.remove("bump"); void b.offsetWidth; b.classList.add("bump"); };
     flyToCart(btn && (btn.closest(".card")?.querySelector(".card__img img") || $(".gallery__main img")), bump);
     if (btn) { // el botón confirma la acción por un momento
@@ -131,7 +138,7 @@
       btn.classList.add("is-done"); btn.innerHTML = `${ICON.check} Agregada`;
       setTimeout(() => { if (btn.isConnected) { btn.classList.remove("is-done"); btn.innerHTML = old; } }, 1400);
     }
-    const msg = before + qty > 10 ? `Máximo 10 unidades de ${p.nombre}` : `${p.nombre} se agregó al carrito (${plural(cartCount(), "producto")})`;
+    const msg = before + qty > 10 ? `Máximo 10 unidades de ${p.nombre}${tallaTexto(talla)}` : `${p.nombre}${tallaTexto(talla)} se agregó al carrito (${plural(cartCount(), "producto")})`;
     toast(msg, { label: "Ver carrito", run: () => go("#/carrito") }, before + qty > 10 ? "info" : "ok");
   }
   // Una copia de la foto viaja hasta el carrito; sin foto o con «reducir movimiento» solo salta el carrito
@@ -151,17 +158,40 @@
       { transform: `translate(${dx}px, ${dy}px) scale(.15)`, opacity: .4 }
     ], { duration: 550, easing: "ease-in" }).finished.then(() => { fly.remove(); done(); });
   }
-  function setQty(id, qty) {
-    if (qty <= 0) delete state.cart[id]; else state.cart[id] = Math.min(10, qty);
-    persist(); updateHeader(); syncItem(id);
+  // key = línea del carrito («12» o «12|7 1/4»)
+  function setQty(key, qty) {
+    if (qty <= 0) delete state.cart[key]; else state.cart[key] = Math.min(10, qty);
+    persist(); updateHeader(); syncItem(key);
   }
   // Con sesión, cada cambio del carrito se guarda en la base
-  const syncItem = id => state.user && DB.guardarItem(state.user.id, Number(id), state.cart[id] || 0).catch(e => dbError(e));
-  function removeItem(id) {
-    const p = byId(id), qty = state.cart[id];
-    setQty(id, 0); viewCart();
-    toast(`Quitaste ${p.nombre} del carrito`, { label: "Deshacer", run: () => { setQty(id, qty); viewCart(); announce(`${p.nombre} volvió al carrito`); } }, "info");
+  const syncItem = key => state.user && DB.guardarItem(state.user.id, key, state.cart[key] || 0).catch(e => dbError(e));
+  const lineName = key => { const [id, talla] = DB.splitKey(key); return byId(id).nombre + tallaTexto(talla); };
+  function removeItem(key) {
+    const name = lineName(key), qty = state.cart[key];
+    setQty(key, 0); viewCart();
+    toast(`Quitaste ${name} del carrito`, { label: "Deshacer", run: () => { setQty(key, qty); viewCart(); announce(`${name} volvió al carrito`); } }, "info");
   }
+  // Avísame cuando vuelva: con sesión se guarda en la base y llega un correo cuando hay stock
+  async function toggleAviso(id, btn) {
+    id = Number(id);
+    const p = byId(id);
+    if (!state.user) {
+      toast("Ingresa a tu cuenta para que te avisemos por correo", { label: "Ingresar", run: () => go("#/ingresar?next=" + encodeURIComponent(location.hash.replace(/^#\/?/, "") || "catalogo")) }, "info");
+      return;
+    }
+    const on = !state.avisos.includes(id);
+    btn.disabled = true;
+    try {
+      if (on) await DB.pedirAviso(id, state.user.email); else await DB.quitarAviso(state.user.id, id);
+      state.avisos = on ? [...state.avisos, id] : state.avisos.filter(a => a !== id);
+      $$(`[data-action="notify"][data-id="${id}"]`).forEach(b => { b.outerHTML = notifyBtn(p, b.classList.contains("btn--block")); });
+      toast(on ? `Te escribiremos a ${state.user.email} cuando ${p.nombre} vuelva` : `Ya no te avisaremos de ${p.nombre}`, null, on ? "ok" : "info");
+    } catch (e) { btn.disabled = false; dbError(e, "No pudimos guardar tu aviso. Intenta de nuevo."); }
+  }
+  const notifyBtn = (p, block = true) => {
+    const on = state.avisos.includes(p.id);
+    return `<button type="button" class="btn ${on ? "btn--borde" : "btn--beige"} ${block ? "btn--block" : ""}" data-action="notify" data-id="${p.id}">${on ? `${ICON.check} Te avisaremos<span class="sr-only">. Presiona para quitar el aviso de ${esc(p.nombre)}</span>` : `Avísame cuando vuelva<span class="sr-only">: ${esc(p.nombre)}</span>`}</button>`;
+  };
   // Las favoritas se guardan en la cuenta: sin sesión se pide ingresar (no se pierden en otro dispositivo).
   function toggleFav(id) {
     id = Number(id);
@@ -205,6 +235,7 @@
     pedidos: viewOrders,
     info: viewInfo,
     "nueva-clave": viewNewPassword,
+    guia: viewGuide,
     perfil: viewProfile,
     salir: async () => {
       try { await DB.salir(); } catch (e) { return dbError(e, "No pudimos cerrar tu sesión. Intenta de nuevo."); }
@@ -287,10 +318,14 @@
 
   function cardHTML(p, headingLevel = 3) {
     const fav = state.favs.includes(p.id);
-    const tag = p.antes ? '<span class="tag tag--oferta">Oferta</span>' : p.nuevo ? '<span class="tag">Nueva</span>' : "";
-    return `<article class="card" aria-labelledby="c${p.id}-${headingLevel}">
-      <div class="card__img">
-        <a href="#/producto/${p.id}" tabindex="-1"><img src="${p.img}" alt="${esc(p.alt)}" loading="lazy"></a>
+    const tag = !p.stock ? '<span class="tag tag--agotada">Agotada</span>' : p.antes ? '<span class="tag tag--oferta">Oferta</span>' : p.nuevo ? '<span class="tag">Nueva</span>' : "";
+    const otra = fotos(p)[1]; // al pasar el mouse se ve otro ángulo
+    const action = !p.stock ? notifyBtn(p)
+      : p.talla ? `<a class="btn btn--cafe btn--block" href="#/producto/${p.id}" aria-label="Elegir talla de ${esc(p.nombre)}">Elegir talla</a>`
+      : `<button type="button" class="btn btn--cafe btn--block" data-action="add" data-id="${p.id}" aria-label="Agregar ${esc(p.nombre)} al carrito">Agregar al carrito</button>`;
+    return `<article class="card ${p.stock ? "" : "card--agotada"}" aria-labelledby="c${p.id}-${headingLevel}">
+      <div class="card__img ${otra ? "card__img--swap" : ""}">
+        <a href="#/producto/${p.id}" tabindex="-1"><img src="${p.img}" alt="${esc(p.alt)}" loading="lazy">${otra ? `<img class="card__img2" src="${otra.url}" alt="" loading="lazy">` : ""}</a>
         ${tag}
         <button type="button" class="fav ${fav ? "on" : ""}" data-action="fav" data-id="${p.id}" aria-pressed="${fav}" aria-label="${esc(favLabel(p, fav))}" title="${fav ? "Quitar de favoritas" : "Guardar en favoritas"}">${ICON.heart}</button>
       </div>
@@ -299,7 +334,7 @@
         <span class="card__meta">${esc(p.tipo)} · ${esc(p.color)}</span>
         ${cardRating(p.id)}
         ${priceHTML(p)}
-        <button type="button" class="btn btn--cafe btn--block" data-action="add" data-id="${p.id}" aria-label="Agregar ${esc(p.nombre)} al carrito">Agregar al carrito</button>
+        ${action}
       </div>
     </article>`;
   }
@@ -485,6 +520,91 @@
     </div></section>`;
   }
 
+  /* ---------- Menús desplegables: equipos por liga y modelos ---------- */
+  const LIGAS = ["MLB", "NBA", "NFL", "Fútbol", "Fórmula 1", "Rugby", "Otra"];
+  const LIGA_NOMBRE = { MLB: "MLB · Béisbol", NBA: "NBA · Básquet", NFL: "NFL · Fútbol americano", Otra: "Otros equipos" };
+  const initials = s => s.split(/\s+/).map(w => w[0]).join("").slice(0, 3).toUpperCase();
+  const teamLogo = (logo, name) => logo
+    ? `<img class="tlogo" src="${logo}" alt="" width="28" height="28" loading="lazy">`
+    : `<span class="tlogo tlogo--txt" aria-hidden="true">${esc(initials(name))}</span>`;
+
+  function buildMega() {
+    const equipos = {};
+    PRODUCTS.forEach(p => {
+      if (p.equipo === "Sin equipo") return;
+      const e = equipos[p.equipo] ||= { nombre: p.equipo, liga: p.liga || "Otra", logo: p.logo, n: 0 };
+      e.n++;
+    });
+    const porLiga = LIGAS.map(l => [l, Object.values(equipos).filter(e => e.liga === l).sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))]).filter(([, t]) => t.length);
+    $("#megaEquipos").innerHTML = `<div class="wrap mega__in">
+      <h2 class="sr-only">Equipos por liga</h2>
+      <div class="mega__cols">${porLiga.map(([liga, teams]) => `<section class="mega__col" aria-labelledby="liga-${initials(liga)}">
+        <h3 id="liga-${initials(liga)}">${esc(LIGA_NOMBRE[liga] || liga)}</h3>
+        <ul>${teams.map(t => `<li><a href="#/catalogo?e=${encodeURIComponent(t.nombre)}">${teamLogo(t.logo, t.nombre)}<span>${esc(t.nombre)}</span><span class="sm" aria-label="${plural(t.n, "gorra")}">${t.n}</span></a></li>`).join("")}</ul>
+      </section>`).join("")}</div></div>`;
+    const tipos = TIPOS.length ? TIPOS : [...new Set(PRODUCTS.map(p => p.tipo))].map(nombre => ({ nombre, descripcion: "" }));
+    $("#megaModelos").innerHTML = `<div class="wrap mega__in">
+      <h2 class="sr-only">Modelos de gorra</h2>
+      <ul class="mega__models">${tipos.map(t => { const n = PRODUCTS.filter(p => p.tipo === t.nombre).length; return n ? `<li><a href="#/catalogo?t=${encodeURIComponent(t.nombre)}"><strong>${esc(t.nombre)} <span class="sm">(${n})</span></strong>${t.descripcion ? `<span class="sm">${esc(t.descripcion)}</span>` : ""}</a></li>` : ""; }).join("")}
+        <li class="mega__guide"><a href="#/guia"><strong>Guía de modelos y tallas →</strong><span class="sm">Diferencias entre modelos y cómo medir tu cabeza</span></a></li>
+      </ul></div>`;
+  }
+  function closeMega(returnFocus = false) {
+    $$('[data-action="megamenu"][aria-expanded="true"]').forEach(b => {
+      b.setAttribute("aria-expanded", "false"); $("#" + b.getAttribute("aria-controls")).hidden = true;
+      if (returnFocus) b.focus();
+    });
+  }
+  function toggleMega(btn) {
+    const open = btn.getAttribute("aria-expanded") !== "true";
+    closeMega();
+    if (!open) return;
+    btn.setAttribute("aria-expanded", "true"); $("#" + btn.getAttribute("aria-controls")).hidden = false;
+  }
+  // Se cierra con Esc, al hacer clic fuera o al elegir una opción
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && $('[data-action="megamenu"][aria-expanded="true"]')) closeMega(true); });
+  document.addEventListener("click", e => { if (!e.target.closest(".mega, [data-action='megamenu']") || e.target.closest(".mega a")) closeMega(); });
+
+  /* ---------- Guía de modelos y tallas ---------- */
+  function viewGuide(r) {
+    const tipos = TIPOS.filter(t => PRODUCTS.some(p => p.tipo === t.nombre));
+    const tabla = (sistema, titulo, nota) => TALLAS[sistema] ? `<table class="sizetable">
+        <caption>${titulo}<span class="sm">${nota}</span></caption>
+        <thead><tr><th scope="col">Talla</th><th scope="col">Contorno de cabeza</th></tr></thead>
+        <tbody>${TALLAS[sistema].map(t => `<tr><th scope="row">${esc(t.etiqueta)}</th><td>${esc(t.medida)}</td></tr>`).join("")}</tbody>
+      </table>` : "";
+    mount(`<div class="wrap">${crumbs([["Catálogo", "#/catalogo"], ["Guía de modelos y tallas"]])}
+      <article class="guide">
+        <h1>Guía de modelos y tallas</h1>
+        <p class="lead">Cada modelo calza distinto. Aquí ves en qué se diferencian y cómo saber tu talla antes de reservar.</p>
+        <section aria-labelledby="gModelos">
+          <h2 id="gModelos">Modelos de gorra</h2>
+          <ul class="guide__models">${tipos.map(t => { const ej = PRODUCTS.find(p => p.tipo === t.nombre && p.stock) || PRODUCTS.find(p => p.tipo === t.nombre); const n = PRODUCTS.filter(p => p.tipo === t.nombre).length; return `<li class="gmodel">
+            <img src="${ej.img}" alt="" loading="lazy">
+            <div><h3>${esc(t.nombre)}</h3><p>${esc(t.descripcion || "")}</p>
+            <a class="link" href="#/catalogo?t=${encodeURIComponent(t.nombre)}">Ver ${plural(n, "gorra")}<span class="sr-only"> del modelo ${esc(t.nombre)}</span></a></div>
+          </li>`; }).join("")}</ul>
+        </section>
+        <section aria-labelledby="gMedir" id="tallas">
+          <h2 id="gMedir" tabindex="-1">Cómo saber tu talla</h2>
+          <p>Solo las gorras cerradas (<strong>59FIFTY</strong> y <strong>39THIRTY</strong>) se venden por talla. Las demás tienen ajuste atrás y le quedan a casi todos.</p>
+          <ol class="guide__steps">
+            <li><strong>Usa una cinta métrica de costura</strong> o un hilo y una regla.</li>
+            <li><strong>Rodea tu cabeza</strong> a 1 cm sobre las cejas y las orejas, por la parte más ancha de atrás.</li>
+            <li><strong>Lee la medida en centímetros</strong> y búscala en la tabla.</li>
+            <li><strong>Si quedas entre dos tallas,</strong> elige la más grande.</li>
+          </ol>
+          <div class="sizetables">
+            ${tabla("fitted", "59FIFTY · adultos", "Gorra cerrada, en octavos de pulgada")}
+            ${tabla("juvenil", "59FIFTY · niños", "Para niños de 4 a 12 años aprox.")}
+            ${tabla("stretch", "39THIRTY · elástica", "Se estira un poco: cubre un rango")}
+          </div>
+          <p class="notice notice--small">${ICON.store}<span>¿Dudas? Pruébatela al retirar: si no te queda, la cambias en el local por otra talla.</span></p>
+        </section>
+      </article></div>`, "Guía de modelos y tallas");
+    if (r.q.get("s") === "tallas") { $("#tallas").scrollIntoView(); $("#gMedir").focus({ preventScroll: true }); }
+  }
+
   function setCatalogQuery(changes, replace = false) {
     const r = parseHash();
     const q = r.name === "catalogo" ? r.q : new URLSearchParams();
@@ -499,7 +619,7 @@
   }
 
   /* ---------- 03 Detalle ---------- */
-  // Las 4 vistas son acercamientos de la misma foto (no hay fotos de otros ángulos).
+  // Gorras con varias fotos: un ángulo por foto. Gorras con una sola foto: 4 acercamientos de esa foto.
   const VIEWS = [
     { z: 1, ox: "50%", oy: "50%", label: "Vista completa" },
     { z: 1.8, ox: "45%", oy: "35%", label: "Acercamiento al logo" },
@@ -507,6 +627,16 @@
     { z: 1.7, ox: "85%", oy: "55%", label: "Acercamiento al costado" }
   ];
   const viewStyle = v => `--z:${v.z};--ox:${v.ox};--oy:${v.oy}`;
+  const capital = s => s.charAt(0).toUpperCase() + s.slice(1);
+  function galleryOf(p) {
+    const list = fotos(p);
+    if (list.length < 2) return VIEWS.map(v => ({ url: p.img, label: v.label, alt: `${v.label}: ${p.alt}`, style: viewStyle(v) }));
+    return list.map((f, i) => {
+      const angulo = i && f.alt.includes(": ") ? capital(f.alt.split(": ").pop()) : "Vista principal";
+      return { url: f.url, label: angulo, alt: i ? f.alt : p.alt, style: "" };
+    });
+  }
+  const SISTEMA = { fitted: "Gorra cerrada 59FIFTY: se vende por talla", juvenil: "59FIFTY de niño: se vende por talla", stretch: "Gorra elástica 39THIRTY: se vende por talla" };
 
   /* ---------- Reseñas (en la base) ---------- */
   const starIcons = n => "★".repeat(Math.round(n)) + "☆".repeat(5 - Math.round(n));
@@ -578,18 +708,49 @@
   function viewProduct(r) {
     const p = byId(r.arg);
     if (!p) return viewNotFound();
-    let qty = 1;
+    let qty = 1, view = 0;
     const fav = state.favs.includes(p.id);
-    const inCart = state.cart[p.id] || 0;
-    const related = PRODUCTS.filter(x => x.id !== p.id && x.tipo === p.tipo)
-      .concat(PRODUCTS.filter(x => x.id !== p.id && x.tipo !== p.tipo)).slice(0, 4);
+    const inCart = inCartOf(p.id);
+    const max = Math.min(10, p.stock);
+    const gal = galleryOf(p);
+    const tallas = p.talla ? TALLAS[p.talla] || [] : [];
+    const related = PRODUCTS.filter(x => x.id !== p.id && x.stock && x.tipo === p.tipo)
+      .concat(PRODUCTS.filter(x => x.id !== p.id && x.stock && x.tipo !== p.tipo)).slice(0, 4);
+    const qtyHint = () => `Máximo ${plural(max, "unidad", "unidades")} por gorra${p.stock <= 3 ? ` (quedan ${p.stock} en el local)` : ""}.${inCartOf(p.id) ? ` Ya tienes ${inCartOf(p.id)} en tu carrito.` : ""}`;
+    const favBtn = `<button type="button" class="fav ${fav ? "on" : ""}" data-action="fav" data-id="${p.id}" aria-pressed="${fav}" aria-label="${esc(favLabel(p, fav))}" title="${fav ? "Quitar de favoritas" : "Guardar en favoritas"}">${ICON.heart}</button>`;
+
+    const sizeHTML = tallas.length ? `<fieldset class="sizes field" data-f="talla" aria-describedby="h_talla m_talla">
+        <legend>Talla <span class="req" aria-hidden="true">*</span><span class="sr-only">(obligatorio)</span></legend>
+        <p class="hint" id="h_talla">${SISTEMA[p.talla]}. ¿No sabes tu talla? <a class="link" href="#/guia?s=tallas">Mira la guía de tallas</a>.</p>
+        <div class="sizes__opts">${tallas.map((t, i) => `<label class="size"><input type="radio" name="talla" value="${esc(t.etiqueta)}" ${i ? "" : 'id="f_talla"'}><span>${esc(t.etiqueta)}<span class="sm">${esc(t.medida)}</span></span></label>`).join("")}</div>
+        <span class="msg" id="m_talla"></span>
+      </fieldset>` : "";
+    const buyHTML = p.stock ? `${sizeHTML}
+          <span class="label" id="qtyLabel">Cantidad</span>
+          <div class="qty" role="group" aria-labelledby="qtyLabel">
+            <button type="button" data-action="dqty" data-d="-1" aria-label="Quitar una unidad" disabled>−</button>
+            <output id="dqty" aria-live="polite" aria-label="Cantidad">1</output>
+            <button type="button" data-action="dqty" data-d="1" aria-label="Agregar una unidad" ${max <= 1 ? "disabled" : ""}>+</button>
+          </div>
+          <p class="hint ${p.stock <= 3 ? "hint--low" : ""}" id="qtyHint">${qtyHint()}</p>
+          <div class="buyrow">
+            <button type="button" class="btn btn--cafe" data-action="addDetail" data-id="${p.id}">${ICON.cart} Agregar al carrito</button>
+            ${favBtn}
+          </div>`
+      : `<p class="notice">${ICON.alert}<span><strong>Agotada por ahora.</strong> Te mandamos un correo apenas vuelva al local.</span></p>
+          <div class="buyrow">${notifyBtn(p, false)}${favBtn}</div>`;
 
     mount(`<div class="wrap">
       ${crumbs([["Catálogo", "#/catalogo"], [esc(p.nombre)]])}
       <div class="detail">
         <section class="gallery" aria-label="Fotos de ${esc(p.nombre)}">
-          <div class="gallery__main"><img id="mainImg" src="${p.img}" alt="${esc(VIEWS[0].label + ": " + p.alt)}" style="${viewStyle(VIEWS[0])}"></div>
-          <div class="thumbs" role="group" aria-label="Elegir vista">${VIEWS.map((v, i) => `<button type="button" class="thumb ${i ? "" : "on"}" data-action="view" data-v="${i}" aria-pressed="${!i}" aria-label="${v.label}" title="${v.label}"><img src="${p.img}" alt="" style="${viewStyle(v)}"></button>`).join("")}</div>
+          <div class="gallery__main">
+            <img id="mainImg" src="${gal[0].url}" alt="${esc(gal[0].alt)}" style="${gal[0].style}">
+            <button type="button" class="gallery__nav gallery__nav--prev" data-action="step" data-d="-1" aria-label="Foto anterior">‹</button>
+            <button type="button" class="gallery__nav gallery__nav--next" data-action="step" data-d="1" aria-label="Foto siguiente">›</button>
+            <span class="gallery__count" id="galCount" aria-live="polite">1 de ${gal.length}</span>
+          </div>
+          <div class="thumbs" role="group" aria-label="Elegir vista">${gal.map((v, i) => `<button type="button" class="thumb ${i ? "" : "on"}" data-action="view" data-v="${i}" aria-pressed="${!i}" aria-label="${esc(v.label)}" title="${esc(v.label)}"><img src="${v.url}" alt="" style="${v.style}" loading="lazy"></button>`).join("")}</div>
         </section>
         <div class="info">
           <h1>${esc(p.nombre)}</h1>
@@ -597,17 +758,7 @@
           <p class="stars" id="starsLine">${starsLine(p.id)}</p>
           <p class="bigprice">${priceHTML(p)}</p>
           <p class="desc">${esc(p.desc)}</p>
-          <span class="label" id="qtyLabel">Cantidad</span>
-          <div class="qty" role="group" aria-labelledby="qtyLabel">
-            <button type="button" data-action="dqty" data-d="-1" aria-label="Quitar una unidad" disabled>−</button>
-            <output id="dqty" aria-live="polite" aria-label="Cantidad">1</output>
-            <button type="button" data-action="dqty" data-d="1" aria-label="Agregar una unidad">+</button>
-          </div>
-          <p class="hint" id="qtyHint">Máximo 10 unidades por gorra.${inCart ? ` Ya tienes ${inCart} en tu carrito.` : ""}</p>
-          <div class="buyrow">
-            <button type="button" class="btn btn--cafe" data-action="addDetail" data-id="${p.id}">${ICON.cart} Agregar al carrito</button>
-            <button type="button" class="fav ${fav ? "on" : ""}" data-action="fav" data-id="${p.id}" aria-pressed="${fav}" aria-label="${esc(favLabel(p, fav))}" title="${fav ? "Quitar de favoritas" : "Guardar en favoritas"}">${ICON.heart}</button>
-          </div>
+          ${buyHTML}
           <ul class="perks" aria-label="Beneficios">
             <li class="perk"><strong>Retiro en el local</strong><span class="sm">sin costo</span></li>
             <li class="perk"><strong>Devolución</strong><span class="sm">en 15 días</span></li>
@@ -632,27 +783,45 @@
 
     app.onclickDetail = action => {
       if (action.dataset.action === "dqty") {
-        qty = Math.min(10, Math.max(1, qty + Number(action.dataset.d)));
+        qty = Math.min(max, Math.max(1, qty + Number(action.dataset.d)));
         $("#dqty").textContent = qty;
         const [minus, plus] = $$('[data-action="dqty"]');
-        minus.disabled = qty === 1; plus.disabled = qty === 10;
+        minus.disabled = qty === 1; plus.disabled = qty === max;
         if (document.activeElement.disabled || !document.activeElement.isConnected) (qty === 1 ? plus : minus).focus();
       } else if (action.dataset.action === "addDetail") {
-        addToCart(p.id, qty, action); // se queda en el detalle: botón «✓ Agregada» + aviso con «Ver carrito»
-        $("#qtyHint").textContent = `Máximo 10 unidades por gorra. Ya tienes ${state.cart[p.id]} en tu carrito.`;
+        const talla = $('input[name="talla"]:checked')?.value || "";
+        if (tallas.length && !talla) { // sin talla no se puede agregar una gorra cerrada
+          showErrors($(".info", app), { talla: "Elige tu talla antes de agregar la gorra al carrito." }, null); // sin resumen: el foco va a la primera talla
+          return;
+        }
+        if (tallas.length) showErrors($(".info", app), {}, null);
+        addToCart(p.id, qty, action, talla); // se queda en el detalle: botón «✓ Agregada» + aviso con «Ver carrito»
+        $("#qtyHint").textContent = qtyHint();
+      } else if (action.dataset.action === "step") {
+        $(`.thumb[data-v="${(view + Number(action.dataset.d) + gal.length) % gal.length}"]`).click();
       } else if (action.dataset.action === "delReview") {
         if (!confirm("¿Borrar tu reseña de esta gorra?")) return;
         DB.borrarResena(Number(action.dataset.rid))
           .then(() => { toast("Borraste tu reseña"); loadReviews(p, true); })
           .catch(e => dbError(e, "No pudimos borrar tu reseña. Intenta de nuevo."));
       } else if (action.dataset.action === "view") {
-        const v = VIEWS[action.dataset.v];
+        view = Number(action.dataset.v);
+        const v = gal[view];
         $$(".thumb").forEach(t => { t.classList.toggle("on", t === action); t.setAttribute("aria-pressed", t === action); });
         const img = $("#mainImg");
-        img.setAttribute("style", viewStyle(v));
-        img.alt = `${v.label}: ${p.alt}`;
+        img.src = v.url; img.setAttribute("style", v.style); img.alt = v.alt;
+        $("#galCount").textContent = `${view + 1} de ${gal.length}`;
       }
     };
+    // Al elegir talla se quita el error
+    $(".sizes")?.addEventListener("change", () => showErrors($(".info", app), {}, null));
+    // Flechas ← → cambian de foto cuando el foco está en la galería
+    $(".gallery").addEventListener("keydown", e => {
+      if (!["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+      e.preventDefault();
+      const next = $(`.thumb[data-v="${(view + (e.key === "ArrowRight" ? 1 : -1) + gal.length) % gal.length}"]`);
+      next.click(); if (e.target.classList.contains("thumb")) next.focus();
+    });
   }
 
   /* ---------- 04 Carrito ---------- */
@@ -672,20 +841,21 @@
         <section aria-label="Productos en el carrito">
           <div class="cols" aria-hidden="true"><span>Producto</span><span>Cantidad</span><span>Precio</span></div>
           <ul class="lines">
-          ${items.map(({ p, qty }) => `<li class="line">
+          ${items.map(({ key, p, talla, qty }) => { const name = esc(p.nombre + tallaTexto(talla)); return `<li class="line">
             <div class="line__prod">
               <img src="${p.img}" alt="${esc(p.alt)}">
               <div><a href="#/producto/${p.id}">${esc(p.nombre)}</a>
+                ${talla ? `<span class="line__size">Talla ${esc(talla)}</span>` : ""}
                 <span class="sm">${esc(p.tipo)} · ${esc(p.color)} · ${money(p.precio)} c/u</span>
-                <button type="button" class="link" data-action="remove" data-id="${p.id}" aria-label="Eliminar ${esc(p.nombre)} del carrito">Eliminar</button></div>
+                <button type="button" class="link" data-action="remove" data-id="${esc(key)}" aria-label="Eliminar ${name} del carrito">Eliminar</button></div>
             </div>
-            <div class="qty" role="group" aria-label="Cantidad de ${esc(p.nombre)}">
-              <button type="button" data-action="qty" data-id="${p.id}" data-d="-1" aria-label="Quitar una unidad de ${esc(p.nombre)}" ${qty <= 1 ? "disabled" : ""}>−</button>
+            <div class="qty" role="group" aria-label="Cantidad de ${name}">
+              <button type="button" data-action="qty" data-id="${esc(key)}" data-d="-1" aria-label="Quitar una unidad de ${name}" ${qty <= 1 ? "disabled" : ""}>−</button>
               <span>${qty}</span>
-              <button type="button" data-action="qty" data-id="${p.id}" data-d="1" aria-label="Agregar una unidad de ${esc(p.nombre)}" ${qty >= 10 ? "disabled" : ""}>+</button>
+              <button type="button" data-action="qty" data-id="${esc(key)}" data-d="1" aria-label="Agregar una unidad de ${name}" ${qty >= Math.min(10, p.stock) ? "disabled" : ""}>+</button>
             </div>
             <div class="line__total"><span class="sr-only">Precio: </span>${money(p.precio * qty)}</div>
-          </li>`).join("")}
+          </li>`; }).join("")}
           </ul>
           <a class="link back" href="#/catalogo">←  Seguir comprando</a>
         </section>
@@ -708,8 +878,8 @@
 
     // Mantener el foco en el mismo botón tras cambiar la cantidad (no perder la posición con teclado).
     if (active?.action === "qty") {
-      const same = $(`[data-action="qty"][data-id="${active.id}"][data-d="${active.d}"]`);
-      const other = $(`[data-action="qty"][data-id="${active.id}"]:not([data-d="${active.d}"])`);
+      const same = $(`[data-action="qty"][data-id="${CSS.escape(active.id)}"][data-d="${active.d}"]`);
+      const other = $(`[data-action="qty"][data-id="${CSS.escape(active.id)}"]:not([data-d="${active.d}"])`);
       (same && !same.disabled ? same : other)?.focus();
     }
 
@@ -965,7 +1135,7 @@
       $("input", f)?.setAttribute("aria-invalid", msg ? "true" : "false");
     });
     const keys = Object.keys(errs);
-    const sum = $(sumSel);
+    const sum = sumSel && $(sumSel);
     if (!keys.length) { if (sum) sum.hidden = true; return false; }
     if (sum) {
       sum.hidden = false;
@@ -1028,7 +1198,7 @@
         </div>
         <aside class="panel" id="resumen" aria-labelledby="sumTitle">
           <h2 id="sumTitle">Resumen del pedido</h2>
-          <ul class="minis">${cartItems().map(({ p, qty }) => `<li class="mini"><img src="${p.img}" alt="${esc(p.alt)}"><div><strong>${esc(p.nombre)}</strong><span class="sm">${esc(p.color)} · ${plural(qty, "unidad", "unidades")}</span></div><span>${money(p.precio * qty)}</span></li>`).join("")}</ul>
+          <ul class="minis">${cartItems().map(({ p, talla, qty }) => `<li class="mini"><img src="${p.img}" alt="${esc(p.alt)}"><div><strong>${esc(p.nombre)}</strong><span class="sm">${esc(p.color)}${esc(tallaTexto(talla))} · ${plural(qty, "unidad", "unidades")}</span></div><span>${money(p.precio * qty)}</span></li>`).join("")}</ul>
           <a class="link small" href="#/carrito">Cambiar productos</a>
           <div style="margin-top:12px">${summaryRows(t)}</div>
           <button class="btn btn--verde btn--block btn--lg" form="checkoutForm" id="confirmBtn">Confirmar reserva · ${money(t.total)}</button>
@@ -1151,7 +1321,7 @@
       const hist = [...o.pedido_estados].sort((a, b) => a.cambiado_en.localeCompare(b.cambiado_en));
       return `<li class="order">
         <div class="order__head"><h2>Pedido ${esc(o.numero)}</h2><span class="badge badge--${o.estado}">${ESTADO[o.estado]}</span><span>${fmtShort(new Date(o.creado_en))} · <strong>${money(Number(o.total))}</strong></span></div>
-        <div class="pics">${o.pedido_items.map(i => { const p = byId(i.producto_id); return p ? `<a href="#/producto/${p.id}"><img src="${p.img}" alt="${esc(i.nombre_producto)}, ${plural(i.cantidad, "unidad", "unidades")}"></a>` : ""; }).join("")}</div>
+        <div class="pics">${o.pedido_items.map(i => { const p = byId(i.producto_id); return p ? `<a href="#/producto/${p.id}"><img src="${p.img}" alt="${esc(i.nombre_producto)}${i.talla ? `, talla ${esc(i.talla)}` : ""}, ${plural(i.cantidad, "unidad", "unidades")}"></a>` : ""; }).join("")}</div>
         <p class="hint">${plural(n, "producto")}${o.codigos_descuento ? ` · código ${esc(o.codigos_descuento.codigo)} (−${money(Number(o.descuento))})` : ""} · pagas al retirar · ${esc(localTexto())}</p>
         ${o.estado === "reservado" ? `<p class="hint"><strong>Retira hasta el ${esc(limiteTexto(o.fecha_limite))}.</strong></p>` : ""}
         <ol class="timeline" aria-label="Historial del pedido ${esc(o.numero)}">${hist.map(h => `<li class="timeline__item timeline__item--${h.estado}">${ESTADO[h.estado]} · ${fmtShort(new Date(h.cambiado_en))}</li>`).join("")}</ol>
@@ -1175,7 +1345,7 @@
     ayuda: ["Ayuda", `<h2>Preguntas frecuentes</h2>
       <dl class="faq">
         <dt>¿Cómo compro?</dt><dd>Elige una gorra, presiona «Agregar al carrito», abre el carrito y presiona «Reservar pedido». Para reservar necesitas una cuenta (puedes crearla o entrar con Google). Te enviamos la confirmación a tu correo y luego retiras y pagas en el local.</dd>
-        <dt>¿Qué talla es?</dt><dd>Todas son talla única con ajuste atrás, salvo las marcadas como «Niño».</dd>
+        <dt>¿Qué talla es?</dt><dd>Las gorras cerradas (59FIFTY y 39THIRTY) se venden por talla: la eliges en la página de la gorra. Las demás son talla única con ajuste atrás. Mira la <a class="link" href="#/guia?s=tallas">guía de tallas</a> para medir tu cabeza.</dd>
         <dt>¿Puedo cambiar mi pedido?</dt><dd>Antes de confirmar, sí: vuelve al carrito y cambia las cantidades. Después, escríbenos a isaacquinga2006@gmail.com.</dd>
         <dt>¿Hacen envíos?</dt><dd>No. Todas las compras se retiran y se pagan en el local.</dd>
         <dt>¿Se guarda mi carrito?</dt><dd>Sí. Con tu cuenta, tu carrito y tus favoritas se guardan y los ves en cualquier dispositivo. Si todavía no ingresas, el carrito queda guardado en este navegador y se suma a tu cuenta al ingresar.</dd>
@@ -1249,7 +1419,9 @@
       }
       case "page": setCatalogQuery({ p: Number(a.dataset.p) }); break;
       case "scroll": $("#catalogo-lista").scrollIntoView(); $("#catTitle").focus({ preventScroll: true }); break;
-      case "qty": setQty(id, (state.cart[id] || 0) + Number(a.dataset.d)); viewCart(); announce(`${byId(id).nombre}: ${plural(state.cart[id], "unidad", "unidades")}. Total ${money(totals().total)}`); break;
+      case "qty": setQty(id, (state.cart[id] || 0) + Number(a.dataset.d)); viewCart(); announce(`${lineName(id)}: ${plural(state.cart[id], "unidad", "unidades")}. Total ${money(totals().total)}`); break;
+      case "notify": toggleAviso(id, a); break;
+      case "megamenu": toggleMega(a); break;
       case "remove": removeItem(id); break;
       case "pay": go(state.user ? "#/checkout" : "#/ingresar?next=checkout"); break;
       case "reveal": {
@@ -1292,8 +1464,9 @@
     app.innerHTML = `<div class="wrap section"><p class="sr-only" role="status">Cargando la tienda…</p>
       <div class="grid" aria-hidden="true">${'<div class="skel"><span></span><span></span><span></span><span></span></div>'.repeat(8)}</div></div>`;
     try {
-      const [productos, local, ratings] = await Promise.all([DB.productos(), DB.local(), DB.calificaciones()]);
+      const [productos, local, ratings, tipos, tallas] = await Promise.all([DB.productos(), DB.local(), DB.calificaciones(), DB.tipos(), DB.tallas()]);
       if (productos.length) PRODUCTS = productos;
+      TIPOS = tipos; TALLAS = tallas;
       if (local) STORE.local = local;
       state.ratings = ratings;
       await loadUser(await DB.sesion());
@@ -1305,6 +1478,7 @@
       return;
     }
     ready = true;
+    buildMega();
     // Vuelta desde Google: ir a donde estaba (p. ej. la reserva) y saludar, o avisar si Google falló
     let next = null;
     try { next = sessionStorage.getItem("nqc_next"); sessionStorage.removeItem("nqc_next"); } catch { /* sin almacenamiento */ }
