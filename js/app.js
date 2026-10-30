@@ -483,7 +483,7 @@
     const openPanel = load("filtrosAbiertos", false);
     const showHero = f === "all" && !term && page === 1 && !nSel;
     mount(`
-      ${showHero ? heroHTML() : ""}
+      ${showHero ? heroHTML() + coleccionesHTML() : ""}
       <section class="wrap section" id="catalogo-lista" aria-labelledby="catTitle">
         ${showHero ? `<h2 class="section__title" id="catTitle" tabindex="-1">Catálogo</h2>` : `<h1 class="section__title" id="catTitle">${f === "fav" ? "Mis favoritas" : term ? "Resultados de búsqueda" : "Catálogo"}</h1>`}
         <div class="toolbar">
@@ -641,6 +641,27 @@
         </section>
       </article></div>`, "Guía de modelos y tallas");
     if (r.q.get("s") === "tallas") { $("#tallas").scrollIntoView(); $("#gMedir").focus({ preventScroll: true }); }
+  }
+
+  /* ---------- Colecciones de la portada (prueba) ---------- */
+  // Cada colección es una búsqueda o un filtro del catálogo; la portada muestra 3 gorras de cada una.
+  const COLECCIONES = [
+    { titulo: "Campeones 2026", texto: "Knicks, Brewers y Rays celebran", href: "#/catalogo?q=champ", test: p => /champ/i.test(p.nombre + " " + p.modelo), tono: "morado" },
+    { titulo: "NFL Sideline 2026", texto: "Lo que usan en la banca", href: "#/catalogo?q=sideline", test: p => /sideline/i.test(p.modelo), tono: "cafe" },
+    { titulo: "Hardwood Classic", texto: "59FIFTY café de la NBA", href: "#/catalogo?q=hardwood", test: p => /hardwood/i.test(p.modelo), tono: "beige" },
+    { titulo: "Fórmula 1", texto: "Red Bull Racing y Williams", href: "#/catalogo?e=Red%20Bull%20Racing%7CWilliams%20Racing", test: p => p.liga === "Fórmula 1", tono: "negro" }
+  ];
+  function coleccionesHTML() {
+    const cols = COLECCIONES.map(c => ({ ...c, items: PRODUCTS.filter(c.test) })).filter(c => c.items.length);
+    if (!cols.length) return "";
+    return `<section class="wrap colls" aria-labelledby="collsTitle">
+      <h2 class="section__title" id="collsTitle">Colecciones</h2>
+      <ul class="colls__list">${cols.map(c => `<li><a class="coll coll--${c.tono}" href="${c.href}">
+        <span class="coll__pics" aria-hidden="true">${c.items.slice(0, 3).map(p => `<img src="${p.img}" alt="" loading="lazy">`).join("")}</span>
+        <span class="coll__txt"><strong>${esc(c.titulo)}</strong><span>${esc(c.texto)} · ${plural(c.items.length, "gorra")}</span></span>
+        <span class="coll__go" aria-hidden="true">→</span>
+      </a></li>`).join("")}</ul>
+    </section>`;
   }
 
   function setCatalogQuery(changes, replace = false) {
