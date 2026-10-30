@@ -687,3 +687,15 @@ kbd { font: 600 13px var(--cuerpo); border: 1px solid var(--borde-campo); border
 @keyframes crowndrop { 0% { transform: translateY(-90px) rotate(-14deg); opacity: 0; } 30% { opacity: 1; } 100% { transform: none; } }
 @keyframes capsquash { 55% { transform: none; } 70% { transform: scale(1.04, .95); } 85% { transform: scale(.99, 1.01); } }
 @keyframes sparkle { 0% { opacity: 0; transform: scale(.4); } 40% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: none; } }
+
+/* ---------- Barra de anuncios (prueba) ---------- */
+.announce { background: var(--negro); color: var(--beige-claro); font-size: 13px; }
+.announce__in { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 36px; position: relative; }
+.announce__msg { margin: 0; text-align: center; padding: 6px 40px; }
+.announce__msg.is-in { animation: rise .35s ease-out; }
+.announce__msg strong { color: var(--blanco); }
+.announce__msg a { color: var(--blanco); font-weight: 700; text-underline-offset: 3px; }
+.announce__pause { position: absolute; right: 0; width: 32px; height: 28px; border: 1px solid #5a4a3e; border-radius: 6px; background: transparent; color: var(--beige-claro); font-size: 10px; letter-spacing: -1px; }
+.announce__pause:hover { border-color: var(--beige); color: var(--blanco); }
+.announce :focus-visible { outline: 2px solid var(--beige-claro); outline-offset: 2px; }
+body.is-welcome .announce { display: none; }

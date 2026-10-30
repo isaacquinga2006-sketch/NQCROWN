@@ -1515,6 +1515,41 @@
     if (e.key === "nqc_cart" && !state.user) { state.cart = load("cart", {}); render(); }
   });
 
+  /* ---------- Barra de anuncios (prueba) ---------- */
+  // Rota cada 5 s; se detiene con el botón de pausa, con el mouse encima o con el foco dentro.
+  const ANUNCIOS = [
+    () => `Reserva en línea y retira en el local · <strong>sin costo de envío</strong>`,
+    () => `<strong>10 % de descuento</strong> con el código CROWN10`,
+    () => `${PRODUCTS.filter(p => p.antes).length} gorras en oferta · <a href="#/catalogo?f=oferta">Ver ofertas</a>`,
+    () => `¿No sabes tu talla? <a href="#/guia?s=tallas">Mira la guía de tallas</a>`
+  ];
+  let anuncio = 0, anuncioTimer = null, anuncioPausa = false, anuncioHover = false;
+  function showAnuncio(i) {
+    const m = $("#announceMsg");
+    anuncio = (i + ANUNCIOS.length) % ANUNCIOS.length;
+    m.classList.remove("is-in"); void m.offsetWidth; m.classList.add("is-in");
+    m.innerHTML = ANUNCIOS[anuncio]();
+  }
+  function tickAnuncios() {
+    clearInterval(anuncioTimer);
+    if (!anuncioPausa && !anuncioHover) anuncioTimer = setInterval(() => showAnuncio(anuncio + 1), 5000);
+  }
+  function initAnuncios() {
+    const bar = $("#announce"), btn = $("#announcePause");
+    showAnuncio(0); tickAnuncios();
+    btn.addEventListener("click", () => {
+      anuncioPausa = !anuncioPausa;
+      btn.setAttribute("aria-pressed", anuncioPausa);
+      btn.textContent = anuncioPausa ? "▶" : "❚❚";
+      btn.setAttribute("aria-label", anuncioPausa ? "Reanudar anuncios" : "Pausar anuncios"); btn.title = btn.getAttribute("aria-label");
+      tickAnuncios();
+    });
+    bar.addEventListener("mouseenter", () => { anuncioHover = true; tickAnuncios(); });
+    bar.addEventListener("mouseleave", () => { anuncioHover = false; tickAnuncios(); });
+    bar.addEventListener("focusin", () => { anuncioHover = true; tickAnuncios(); });
+    bar.addEventListener("focusout", () => { anuncioHover = false; tickAnuncios(); });
+  }
+
   /* ---------- Inicio: catálogo, local y sesión desde la base ---------- */
   async function init() {
     // Tarjetas grises con brillo mientras llega el catálogo
@@ -1536,6 +1571,7 @@
     }
     ready = true;
     buildMega();
+    initAnuncios();
     // Vuelta desde Google: ir a donde estaba (p. ej. la reserva) y saludar, o avisar si Google falló
     let next = null;
     try { next = sessionStorage.getItem("nqc_next"); sessionStorage.removeItem("nqc_next"); } catch { /* sin almacenamiento */ }
