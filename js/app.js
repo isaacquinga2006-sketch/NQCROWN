@@ -282,11 +282,15 @@
   const favLabel = (p, on) => on ? `Quitar ${p.nombre} de favoritas` : `Guardar ${p.nombre} en favoritas${state.user ? "" : " (necesitas ingresar)"}`;
 
   /* ---------- Rutas ---------- */
+  // La portada sale cada vez que se abre el link principal (pestaña nueva). Dentro de la misma visita,
+  // el logo o «atrás» llevan al catálogo; los links directos (una gorra, un pedido) no pasan por la portada.
+  const portadaVista = () => { try { return sessionStorage.getItem("nqc_portada") === "1"; } catch { return false; } };
+  const marcarPortada = () => { try { sessionStorage.setItem("nqc_portada", "1"); } catch { /* sin almacenamiento */ } };
   function parseHash() {
     const raw = location.hash.replace(/^#\/?/, "");
     const [path, qs = ""] = raw.split("?");
     const parts = path.split("/").filter(Boolean);
-    return { name: parts[0] || (load("visto", false) ? "catalogo" : "bienvenida"), arg: parts[1], q: new URLSearchParams(qs) };
+    return { name: parts[0] || (portadaVista() || DB.enlace.code ? "catalogo" : "bienvenida"), arg: parts[1], q: new URLSearchParams(qs) };
   }
   const go = h => { location.hash = h; };
 
@@ -446,17 +450,27 @@
     `<li>${href ? `<a href="${href}">${label}</a>` : `<span aria-current="page">${label}</span>`}</li>`).join("")}</ol></nav>`;
 
   /* ---------- 01 Bienvenida ---------- */
-  // Solo aparece la primera vez que alguien abre la página; después «/» va directo al catálogo.
+  // Sale al abrir el link principal: logo, frase, entrar a la tienda u ofertas, y tres datos de la tienda.
+  const LIGAS_PORTADA = [["mlb", "MLB"], ["nba", "NBA"], ["nfl", "NFL"], ["f1", "Fórmula 1"]];
   function viewWelcome() {
-    save("visto", true);
+    marcarPortada();
+    const nOferta = PRODUCTS.filter(p => p.antes).length;
     mount(`<section class="welcome" aria-labelledby="wTitle">
-      <div>
-        <img src="img/logo-nq-crown.png" alt="Logo de NQ Crown: las letras NQ con una gorra con corona encima">
+      <div class="welcome__in">
+        <span class="welcome__logo"><img src="img/logo-nq-crown.png" alt="Logo de NQ Crown: las letras NQ con una gorra con corona encima"></span>
         <h1 id="wTitle">NQ Crown</h1>
-        <p>Gorras con carácter, hechas para quien lleva la corona.</p>
-        <a class="btn btn--beige" href="#/catalogo">Entrar a la tienda</a>
+        <p class="welcome__lead">Gorras con carácter, hechas para quien lleva la corona.</p>
+        <div class="welcome__ctas">
+          <a class="btn btn--beige" id="welcomeGo" href="#/catalogo">Entrar a la tienda</a>
+          ${nOferta ? `<a class="btn welcome__alt" href="#/catalogo?f=oferta">Ver ofertas (${nOferta})</a>` : ""}
+        </div>
+        <ul class="welcome__facts" aria-label="Sobre la tienda">
+          <li>${PRODUCTS.length} gorras originales</li><li>Retiro en el local</li><li>Pagas al retirar</li>
+        </ul>
+        <ul class="welcome__leagues" aria-label="Ligas y equipos">${LIGAS_PORTADA.map(([k, n]) => `<li><img src="https://a.espncdn.com/i/teamlogos/leagues/500/${k}.png" alt="${n}" width="36" height="36"></li>`).join("")}</ul>
       </div>
     </section>`);
+    $("#welcomeGo").focus({ preventScroll: true }); // con teclado basta presionar Enter
   }
 
   /* ---------- 02 Catálogo ---------- */
