@@ -36,6 +36,7 @@
       marca: r.marcas.nombre,
       equipo: r.equipos ? r.equipos.nombre : "Sin equipo",
       color: r.colores.nombre,
+      hex: r.colores.hex,
       precio: Number(r.precio),
       antes: r.precio_antes ? Number(r.precio_antes) : 0,
       nuevo: r.es_nueva,
@@ -71,7 +72,7 @@
     /* ---------- Catálogo y tienda ---------- */
     async productos() {
       const rows = ok(await sb.from("productos")
-        .select("id, nombre, modelo, descripcion, detalles, precio, precio_antes, es_nueva, stock, sistema_talla, tipos(nombre), marcas(nombre), equipos(nombre, liga, logo_url), colores(nombre), producto_imagenes(url, texto_alt, orden)")
+        .select("id, nombre, modelo, descripcion, detalles, precio, precio_antes, es_nueva, stock, sistema_talla, tipos(nombre), marcas(nombre), equipos(nombre, liga, logo_url), colores(nombre, hex), producto_imagenes(url, texto_alt, orden)")
         .order("id"));
       return rows.map(toProduct);
     },

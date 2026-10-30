@@ -106,7 +106,7 @@ body.is-welcome .topbar, body.is-welcome .footer { display: none; }
 .card__img { position: relative; aspect-ratio: 31 / 25; overflow: hidden; flex: none; background: var(--blanco); border-bottom: 1.5px solid var(--beige-claro); color: var(--texto); }
 .card__img a { position: absolute; inset: 0; }
 .card__img img { width: 100%; height: 100%; object-fit: contain; padding: 8px; transition: transform .3s; }
-.card:hover .card__img img { transform: scale(1.04); }
+.card:hover .card__img a img { transform: scale(1.04); }
 .tag { position: absolute; top: 12px; left: 12px; padding: 3px 12px; border-radius: 12px; font-size: 11px; font-weight: 700; color: var(--blanco); background: var(--morado); }
 .tag--oferta { background: var(--verde); color: var(--blanco); }
 .fav { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid var(--morado); background: var(--blanco); display: grid; place-items: center; padding: 0; color: var(--morado); }
@@ -475,25 +475,32 @@ kbd { font: 600 13px var(--cuerpo); border: 1px solid var(--borde-campo); border
 .timeline__item--cancelado::before { background: var(--rojo); color: var(--rojo); }
 .btn--sm { height: 40px; padding: 0 16px; font-size: 14px; }
 
-/* ---------- Avisos: grandes, en el centro y con color según el tipo ---------- */
-.toast { position: fixed; left: 50%; top: 50%; z-index: 60; width: min(32rem, 100% - 2rem); display: flex; align-items: center; gap: 16px; padding: 22px 22px 22px 20px; background: var(--blanco); color: var(--texto); border: 2px solid var(--verde); border-left-width: 10px; border-radius: 14px; box-shadow: 0 24px 60px rgba(36, 24, 18, .35), 0 0 0 100vmax rgba(36, 24, 18, .18); opacity: 0; visibility: hidden; pointer-events: none; transform: translate(-50%, -50%) scale(.94); transition: opacity .2s, transform .2s, visibility .2s; }
-.toast.show { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
-.toast__icon { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--verde); color: var(--blanco); }
-.toast__icon svg { width: 28px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
-.toast__msg { flex: 1; margin: 0; font-size: 17px; font-weight: 600; line-height: 1.35; color: var(--texto); background-color: transparent; }
-.toast__actions { display: flex; align-items: center; gap: 8px; flex: none; }
-.toast__btn { height: 40px; padding: 0 16px; border-radius: 20px; border: 0; background: var(--verde); color: var(--blanco); font-weight: 700; white-space: nowrap; }
-.toast__btn:hover { filter: brightness(1.12); background: var(--verde); color: var(--blanco); }
-.toast__close { width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--borde-campo); background: var(--blanco); color: var(--texto); font-size: 16px; line-height: 1; }
+/* ---------- Avisos: abajo a la derecha, con foto de la gorra y barra de tiempo ---------- */
+.toast { --tc: var(--verde); position: fixed; right: 24px; bottom: 24px; z-index: 60; width: min(26rem, 100% - 2rem); display: flex; align-items: center; gap: 14px; padding: 14px 14px 18px; overflow: hidden; background: var(--blanco); color: var(--texto); border: 1.5px solid var(--beige-claro); border-left: 6px solid var(--tc); border-radius: 14px; box-shadow: 0 16px 40px rgba(36, 24, 18, .22); opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(24px); transition: opacity .25s, transform .3s cubic-bezier(.2, 1.4, .4, 1), visibility .25s; }
+.toast.show { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0); }
+.toast--info { --tc: var(--cafe); }
+.toast--error { --tc: var(--rojo); background: #fff5f4; }
+.toast__icon { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--tc); color: var(--blanco); }
+.toast__icon svg { width: 22px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.toast__icon--img { width: 60px; height: 60px; border-radius: 10px; background: var(--crema); border: 1.5px solid var(--beige-claro); }
+.toast__icon--img img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+.toast__body { flex: 1; min-width: 0; }
+.toast__msg { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--texto); background-color: transparent; }
+.toast--error .toast__msg { color: #7a1a14; }
+.toast__detail { margin: 2px 0 0; font-size: 13px; line-height: 1.35; color: var(--suave); background-color: transparent; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.toast__actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.toast__btn { height: 36px; padding: 0 14px; border-radius: 18px; border: 1.5px solid var(--tc); background: var(--blanco); color: var(--tc); font-weight: 700; font-size: 14px; white-space: nowrap; }
+.toast__btn:hover { background: var(--tc); color: var(--blanco); }
+.toast__close { width: 32px; height: 32px; border-radius: 50%; border: 0; background: transparent; color: var(--suave); font-size: 14px; line-height: 1; }
 .toast__close:hover { background: var(--crema); color: var(--texto); }
-.toast--info { border-color: var(--morado); }
-.toast--info .toast__icon, .toast--info .toast__btn, .toast--info .toast__btn:hover { background: var(--morado); color: var(--blanco); }
-.toast--error { border-color: var(--rojo); background: #fff5f4; color: var(--texto); }
-.toast--error .toast__icon, .toast--error .toast__btn, .toast--error .toast__btn:hover { background: var(--rojo); color: var(--blanco); }
-.toast--error .toast__msg { color: #7a1a14; background-color: transparent; }
+/* Barra que se vacía en 3 s; se congela con el mouse o el foco encima */
+.toast__bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: var(--tc); opacity: .55; transform-origin: left; transform: scaleX(0); }
+.toast.is-timing .toast__bar { animation: toastbar 3s linear forwards; }
+.toast.is-paused .toast__bar { animation-play-state: paused; }
+@keyframes toastbar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @media (max-width: 32.5rem) {
-  .toast { flex-wrap: wrap; padding: 18px 16px; }
-  .toast__actions { width: 100%; justify-content: flex-end; }
+  .toast { right: 12px; left: 12px; bottom: 12px; width: auto; flex-wrap: wrap; }
+  .toast__actions { margin-left: auto; }
 }
 
 /* ---------- Buscador con botón de envío ---------- */
@@ -660,3 +667,23 @@ kbd { font: 600 13px var(--cuerpo); border: 1px solid var(--borde-campo); border
   .mainnav { gap: 16px; flex-wrap: wrap; }
   .guide { padding: 20px 16px; }
 }
+
+/* ---------- Ofertas con ahorro y logo del equipo en la tarjeta ---------- */
+.save { display: inline-block; margin-left: 2px; padding: 1px 8px; border-radius: 8px; background: #e3efe8; color: var(--verde); font-size: 12px; font-weight: 700; vertical-align: middle; white-space: nowrap; }
+.card__img .card__team { position: absolute; left: 10px; bottom: 10px; width: 34px; height: 34px; padding: 4px; object-fit: contain; border-radius: 50%; background: var(--blanco); border: 1.5px solid var(--beige-claro); box-shadow: 0 2px 6px rgba(36, 24, 18, .12); pointer-events: none; }
+
+/* ---------- Muestras de color en el filtro ---------- */
+.facet__opt .swatch { width: 18px; height: 18px; border-radius: 50%; flex: none; border: 1.5px solid var(--borde-campo); box-shadow: inset 0 0 0 2px var(--blanco); }
+.facet__opt.is-empty .swatch { opacity: .4; }
+
+/* ---------- Ilustración de las pantallas vacías ---------- */
+.empty__art { display: block; width: 180px; height: auto; margin: 0 auto 14px; animation: rise .4s ease-out; }
+
+/* ---------- Reserva lista: la corona cae sobre la gorra ---------- */
+.crowncap { display: block; width: 200px; height: auto; margin: 0 auto 12px; overflow: visible; }
+.crowncap__crown { animation: crowndrop .9s cubic-bezier(.3, 1.6, .5, 1) .25s backwards; transform-origin: 108px 50px; }
+.crowncap__cap { animation: capsquash .9s ease-out .25s; transform-origin: 108px 150px; }
+.crowncap__spark { animation: sparkle 1.6s ease-out 1s backwards; transform-origin: 110px 80px; }
+@keyframes crowndrop { 0% { transform: translateY(-90px) rotate(-14deg); opacity: 0; } 30% { opacity: 1; } 100% { transform: none; } }
+@keyframes capsquash { 55% { transform: none; } 70% { transform: scale(1.04, .95); } 85% { transform: scale(.99, 1.01); } }
+@keyframes sparkle { 0% { opacity: 0; transform: scale(.4); } 40% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: none; } }

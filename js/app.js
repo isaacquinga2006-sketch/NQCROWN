@@ -86,25 +86,31 @@
   }
 
   /* ---------- Respuesta del sistema (microinteracciones) ---------- */
-  // Aviso grande en el centro de la pantalla. El color y el ícono cambian según el tipo:
-  // «ok» (verde, se hizo), «info» (morado, hace falta algo) y «error» (rojo, algo falló).
-  // Dura 6 s (los errores 9 s), se pausa con el mouse o el foco y se cierra con «Esc» o con ✕.
-  let toastTimer, toastAction = null, toastMs = 6000;
+  // Aviso abajo a la derecha (abajo a lo ancho en el celular), sin tapar la página. El color y el ícono
+  // cambian según el tipo: «ok» (verde, se hizo), «info» (café, dato o algo que falta) y «error» (rojo).
+  // Si es de una gorra muestra su foto, un título corto y el detalle. Dura 3 s (la barra de abajo
+  // muestra el tiempo), se pausa con el mouse o el foco y se cierra con «Esc» o con ✕.
+  let toastTimer, toastAction = null, toastMs = 3000;
   const TOAST_ICON = { ok: "check", info: "alert", error: "alert" };
-  function toast(msg, action, type = "ok") {
+  function toast(msg, action, type = "ok", extra = {}) { // extra: { detalle, img }
     const t = $("#toast");
     t.className = `toast toast--${type}`;
     t.setAttribute("role", type === "error" ? "alert" : "status");
-    $("#toastIcon").innerHTML = ICON[TOAST_ICON[type]];
+    $("#toastIcon").innerHTML = extra.img ? `<img src="${extra.img}" alt="">` : ICON[TOAST_ICON[type]];
+    $("#toastIcon").classList.toggle("toast__icon--img", !!extra.img);
     $("#toastMsg").textContent = msg;
+    $("#toastDetail").textContent = extra.detalle || "";
+    $("#toastDetail").hidden = !extra.detalle;
     toastAction = action || null;
     $("#toastActions").innerHTML = (action ? `<button type="button" class="toast__btn" data-toast="run">${esc(action.label)}</button>` : "")
       + `<button type="button" class="toast__close" data-toast="close" aria-label="Cerrar aviso" title="Cerrar aviso">✕</button>`;
     void t.offsetWidth; // reinicia la animación si ya estaba visible
     t.classList.add("show");
-    toastMs = 3000; // se pausa mientras el mouse o el foco están sobre el aviso
     restartToast();
   }
+  // Aviso de una gorra: foto + título + «nombre · talla · precio»
+  const toastGorra = (titulo, p, talla, action, type = "ok") =>
+    toast(titulo, action, type, { img: p.img, detalle: `${p.nombre}${tallaTexto(talla)} · ${money(p.precio)}` });
   function hideToast() {
     clearTimeout(toastTimer);
     const t = $("#toast");
@@ -112,11 +118,16 @@
     t.classList.remove("show");
     $("#toastActions").innerHTML = ""; // sin botones vacíos ni ocultos en el aviso cerrado
   }
-  function restartToast() { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, toastMs); }
-  $("#toast").addEventListener("mouseenter", () => clearTimeout(toastTimer));
-  $("#toast").addEventListener("mouseleave", restartToast);
-  $("#toast").addEventListener("focusin", () => clearTimeout(toastTimer));
-  $("#toast").addEventListener("focusout", restartToast);
+  // La barra de tiempo vuelve a empezar con el reloj y se congela mientras está en pausa
+  function restartToast() {
+    clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, toastMs);
+    const t = $("#toast"); t.classList.remove("is-paused", "is-timing"); void t.offsetWidth; t.classList.add("is-timing");
+  }
+  const pauseToast = () => { clearTimeout(toastTimer); $("#toast").classList.add("is-paused"); };
+  $("#toast").addEventListener("mouseenter", pauseToast);
+  $("#toast").addEventListener("mouseleave", () => { if (!$("#toast").contains(document.activeElement)) restartToast(); });
+  $("#toast").addEventListener("focusin", pauseToast);
+  $("#toast").addEventListener("focusout", e => { if (!$("#toast").contains(e.relatedTarget) && $("#toast").classList.contains("show")) restartToast(); });
   $("#toast").addEventListener("click", e => {
     const b = e.target.closest("[data-toast]");
     if (!b) return;
@@ -138,8 +149,9 @@
       btn.classList.add("is-done"); btn.innerHTML = `${ICON.check} Agregada`;
       setTimeout(() => { if (btn.isConnected) { btn.classList.remove("is-done"); btn.innerHTML = old; } }, 1400);
     }
-    const msg = before + qty > 10 ? `Máximo 10 unidades de ${p.nombre}${tallaTexto(talla)}` : `${p.nombre}${tallaTexto(talla)} se agregó al carrito (${plural(cartCount(), "producto")})`;
-    toast(msg, { label: "Ver carrito", run: () => go("#/carrito") }, before + qty > 10 ? "info" : "ok");
+    const ver = { label: "Ver carrito", run: () => go("#/carrito") };
+    if (before + qty > 10) toastGorra("Máximo 10 unidades por gorra", p, talla, ver, "info");
+    else toastGorra(`Agregada al carrito · ${plural(cartCount(), "producto")}`, p, talla, ver);
   }
   // Una copia de la foto viaja hasta el carrito; sin foto o con «reducir movimiento» solo salta el carrito
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
@@ -167,9 +179,9 @@
   const syncItem = key => state.user && DB.guardarItem(state.user.id, key, state.cart[key] || 0).catch(e => dbError(e));
   const lineName = key => { const [id, talla] = DB.splitKey(key); return byId(id).nombre + tallaTexto(talla); };
   function removeItem(key) {
-    const name = lineName(key), qty = state.cart[key];
+    const name = lineName(key), qty = state.cart[key], [id, talla] = DB.splitKey(key);
     setQty(key, 0); viewCart();
-    toast(`Quitaste ${name} del carrito`, { label: "Deshacer", run: () => { setQty(key, qty); viewCart(); announce(`${name} volvió al carrito`); } }, "info");
+    toastGorra("Quitada del carrito", byId(id), talla, { label: "Deshacer", run: () => { setQty(key, qty); viewCart(); announce(`${name} volvió al carrito`); } }, "info");
   }
   // Avísame cuando vuelva: con sesión se guarda en la base y llega un correo cuando hay stock
   async function toggleAviso(id, btn) {
@@ -185,7 +197,7 @@
       if (on) await DB.pedirAviso(id, state.user.email); else await DB.quitarAviso(state.user.id, id);
       state.avisos = on ? [...state.avisos, id] : state.avisos.filter(a => a !== id);
       $$(`[data-action="notify"][data-id="${id}"]`).forEach(b => { b.outerHTML = notifyBtn(p, b.classList.contains("btn--block")); });
-      toast(on ? `Te escribiremos a ${state.user.email} cuando ${p.nombre} vuelva` : `Ya no te avisaremos de ${p.nombre}`, null, on ? "ok" : "info");
+      toast(on ? "Te avisaremos cuando vuelva" : "Quitaste el aviso", null, on ? "ok" : "info", { img: p.img, detalle: on ? `${p.nombre} · correo a ${state.user.email}` : p.nombre });
     } catch (e) { btn.disabled = false; dbError(e, "No pudimos guardar tu aviso. Intenta de nuevo."); }
   }
   const notifyBtn = (p, block = true) => {
@@ -201,7 +213,7 @@
     }
     const on = !state.favs.includes(id);
     state.favs = on ? [...state.favs, id] : state.favs.filter(f => f !== id);
-    toast(on ? `${byId(id).nombre} se guardó en tus favoritas` : `${byId(id).nombre} se quitó de tus favoritas`);
+    toastGorra(on ? "Guardada en tus favoritas" : "Quitada de tus favoritas", byId(id), "", null, on ? "ok" : "info");
     DB.marcarFavorito(state.user.id, id, on).catch(e => {
       state.favs = on ? state.favs.filter(f => f !== id) : [...state.favs, id];
       paintFav(id, !on);
@@ -312,13 +324,14 @@
   }
 
   /* ---------- Piezas reutilizables ---------- */
+  const pctOff = p => Math.round((1 - p.precio / p.antes) * 100);
   const priceHTML = p => p.antes
-    ? `<span class="price"><span class="sr-only">Precio de oferta </span>${money(p.precio)} <del><span class="sr-only">antes </span>${money(p.antes)}</del></span>`
+    ? `<span class="price"><span class="sr-only">Precio de oferta </span>${money(p.precio)} <del><span class="sr-only">antes </span>${money(p.antes)}</del> <span class="save">Ahorras ${money(p.antes - p.precio)}</span></span>`
     : `<span class="price">${money(p.precio)}</span>`;
 
   function cardHTML(p, headingLevel = 3) {
     const fav = state.favs.includes(p.id);
-    const tag = !p.stock ? '<span class="tag tag--agotada">Agotada</span>' : p.antes ? '<span class="tag tag--oferta">Oferta</span>' : p.nuevo ? '<span class="tag">Nueva</span>' : "";
+    const tag = !p.stock ? '<span class="tag tag--agotada">Agotada</span>' : p.antes ? `<span class="tag tag--oferta"><span class="sr-only">Oferta: </span>−${pctOff(p)} %</span>` : p.nuevo ? '<span class="tag">Nueva</span>' : "";
     const otra = fotos(p)[1]; // al pasar el mouse se ve otro ángulo
     const action = !p.stock ? notifyBtn(p)
       : p.talla ? `<a class="btn btn--cafe btn--block" href="#/producto/${p.id}" aria-label="Elegir talla de ${esc(p.nombre)}">Elegir talla</a>`
@@ -327,6 +340,7 @@
       <div class="card__img ${otra ? "card__img--swap" : ""}">
         <a href="#/producto/${p.id}" tabindex="-1"><img src="${p.img}" alt="${esc(p.alt)}" loading="lazy">${otra ? `<img class="card__img2" src="${otra.url}" alt="" loading="lazy">` : ""}</a>
         ${tag}
+        ${p.logo ? `<img class="card__team" src="${p.logo}" alt="" title="${esc(p.equipo)}" loading="lazy">` : ""}
         <button type="button" class="fav ${fav ? "on" : ""}" data-action="fav" data-id="${p.id}" aria-pressed="${fav}" aria-label="${esc(favLabel(p, fav))}" title="${fav ? "Quitar de favoritas" : "Guardar en favoritas"}">${ICON.heart}</button>
       </div>
       <div class="card__body">
@@ -353,6 +367,27 @@
       <div class="row row--total"><dt>Total a pagar en el local</dt><dd>${money(t.total)}</dd></div>
     </dl>`;
   }
+  // Ilustración de las pantallas vacías: la gorra de NQ Crown con un ícono según el caso
+  const ART_ICON = {
+    cart: '<path d="M3 4h2l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.1L21 8H6.2"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17.5" cy="20" r="1.3"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+    bag: '<path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/>',
+    question: '<path d="M9 9a3 3 0 1 1 4 2.8c-.7.3-1 .9-1 1.7V15M12 18.5v.01"/>',
+    alert: '<path d="M12 7.5v6M12 17v.01"/><circle cx="12" cy="12" r="9"/>'
+  };
+  const emptyArt = icon => `<svg class="empty__art" viewBox="0 0 200 140" aria-hidden="true" focusable="false">
+    <ellipse cx="104" cy="126" rx="74" ry="8" fill="#E6DBC8"/>
+    <path d="M40 94C40 52 68 28 102 28s62 24 62 66z" fill="#4A2E20"/>
+    <path d="M102 28c-8 20-10 42-8 66M102 28c14 18 22 40 24 66" fill="none" stroke="#6b4a37" stroke-width="2"/>
+    <path d="M84 70l8 7 10-12 10 12 8-7-3 16H87z" fill="#B59F7E"/>
+    <circle cx="102" cy="28" r="5" fill="#B59F7E"/>
+    <rect x="38" y="88" width="128" height="9" rx="4.5" fill="#2e1b12"/>
+    <path d="M40 96c40 2 100 6 150 18-10 10-60 10-120-2-18-4-30-9-30-16z" fill="#6b4a37"/>
+    <circle cx="164" cy="34" r="24" fill="#fff" stroke="#6B3FA0" stroke-width="3"/>
+    <g transform="translate(152 22)" fill="none" stroke="#6B3FA0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${ART_ICON[icon]}</g>
+  </svg>`;
   const crumbs = items => `<nav class="crumbs" aria-label="Estás aquí"><ol>${items.map(([label, href], i) =>
     `<li>${href ? `<a href="${href}">${label}</a>` : `<span aria-current="page">${label}</span>`}</li>`).join("")}</ol></nav>`;
 
@@ -378,6 +413,9 @@
     { key: "c", title: "Color", get: p => p.color },
     { key: "m", title: "Marca", get: p => p.marca }
   ];
+  // Muestra del color real junto al nombre (camuflado y multicolor con mezcla de tonos)
+  const SWATCH_MIX = { Camuflado: "conic-gradient(#5B6B47 0 25%, #8a7a52 0 50%, #3b3a2a 0 75%, #6f8a5a 0)", Multicolor: "conic-gradient(#b22234 0 25%, #1f4fa3 0 50%, #e0701f 0 75%, #3e6b48 0)" };
+  const swatch = color => { const hex = PRODUCTS.find(p => p.color === color)?.hex; return hex ? `<span class="swatch" style="background:${SWATCH_MIX[color] || hex}" aria-hidden="true"></span>` : ""; };
   const listParam = (q, k) => (q.get(k) || "").split("|").filter(Boolean);
   const inPrice = (p, ids) => !ids.length || ids.some(id => { const r = STORE.precios.find(x => x.id === id); return r && p.precio >= r.min && p.precio <= r.max; });
 
@@ -415,9 +453,9 @@
 
     // Panel de filtros: cada opción muestra cuántas gorras quedarían al marcarla
     let n = 0;
-    const group = (key, title, options) => `<fieldset class="facet"><legend>${title}</legend>${options.map(([value, label, count]) => {
+    const group = (key, title, options) => `<fieldset class="facet ${key === "c" ? "facet--colors" : ""}"><legend>${title}</legend>${options.map(([value, label, count]) => {
       const id = `fl${n++}`, on = sel[key].includes(value);
-      return `<label class="facet__opt ${count || on ? "" : "is-empty"}" for="${id}"><input type="checkbox" id="${id}" data-facet="${key}" value="${esc(value)}" ${on ? "checked" : ""} ${count || on ? "" : "disabled"}><span>${esc(label)}</span><span class="sm" aria-label="${plural(count, "gorra")}">${count}</span></label>`;
+      return `<label class="facet__opt ${count || on ? "" : "is-empty"}" for="${id}"><input type="checkbox" id="${id}" data-facet="${key}" value="${esc(value)}" ${on ? "checked" : ""} ${count || on ? "" : "disabled"}>${key === "c" ? swatch(value) : ""}<span>${esc(label)}</span><span class="sm" aria-label="${plural(count, "gorra")}">${count}</span></label>`;
     }).join("")}</fieldset>`;
     const facetsHTML = FACETS.map(fc => {
       const values = [...new Set(PRODUCTS.map(fc.get))].sort((a, b) => a === "Sin equipo" ? 1 : b === "Sin equipo" ? -1 : a.localeCompare(b, "es"));
@@ -435,11 +473,11 @@
         <button type="button" data-action="page" data-p="${page + 1}" ${page === pages ? "disabled" : ""} aria-label="Página siguiente">›</button>
       </nav>`;
     } else if (f === "fav" && !state.user) {
-      body = `<div class="empty"><h3>Ingresa para ver tus favoritas</h3><p>Tus favoritas se guardan en tu cuenta, así las ves en cualquier dispositivo.</p><a class="btn btn--cafe" href="#/ingresar?next=${encodeURIComponent("catalogo?f=fav")}">Ingresar</a></div>`;
+      body = `<div class="empty">${emptyArt("heart")}<h3>Ingresa para ver tus favoritas</h3><p>Tus favoritas se guardan en tu cuenta, así las ves en cualquier dispositivo.</p><a class="btn btn--cafe" href="#/ingresar?next=${encodeURIComponent("catalogo?f=fav")}">Ingresar</a></div>`;
     } else if (f === "fav" && !term && !nSel) {
-      body = `<div class="empty"><h3>Aún no tienes favoritas</h3><p>Toca el corazón ${ICON.heart} de una gorra para guardarla aquí.</p><button type="button" class="btn btn--cafe" data-action="filter" data-f="all">Ver todas las gorras</button></div>`;
+      body = `<div class="empty">${emptyArt("heart")}<h3>Aún no tienes favoritas</h3><p>Toca el corazón ${ICON.heart} de una gorra para guardarla aquí.</p><button type="button" class="btn btn--cafe" data-action="filter" data-f="all">Ver todas las gorras</button></div>`;
     } else {
-      body = `<div class="empty"><h3>No encontramos gorras${term ? ` para «${esc(term)}»` : ""} con esos filtros</h3><p>Prueba con otra palabra, un equipo (por ejemplo «Yankees») o quita algún filtro.</p>${nSel ? `<button type="button" class="btn btn--cafe" data-action="clearfacets">Quitar filtros</button>` : `<a class="btn btn--cafe" href="#/catalogo">Ver todo el catálogo</a>`}</div>`;
+      body = `<div class="empty">${emptyArt("search")}<h3>No encontramos gorras${term ? ` para «${esc(term)}»` : ""} con esos filtros</h3><p>Prueba con otra palabra, un equipo (por ejemplo «Yankees») o quita algún filtro.</p>${nSel ? `<button type="button" class="btn btn--cafe" data-action="clearfacets">Quitar filtros</button>` : `<a class="btn btn--cafe" href="#/catalogo">Ver todo el catálogo</a>`}</div>`;
     }
 
     const openPanel = load("filtrosAbiertos", false);
@@ -832,7 +870,7 @@
     const cr = crumbs([["Catálogo", "#/catalogo"], ["Carrito"]]);
     if (!items.length) {
       return mount(`<div class="wrap">${cr}${head}
-        <div class="empty"><h2>Tu carrito está vacío</h2><p>Agrega una gorra desde el catálogo para empezar tu pedido.</p><a class="btn btn--cafe" href="#/catalogo">Ver catálogo</a></div></div>`, "Carrito");
+        <div class="empty">${emptyArt("cart")}<h2>Tu carrito está vacío</h2><p>Agrega una gorra desde el catálogo para empezar tu pedido.</p><a class="btn btn--cafe" href="#/catalogo">Ver catálogo</a></div></div>`, "Carrito");
     }
     const t = totals();
     const active = document.activeElement?.dataset;
@@ -1014,7 +1052,7 @@
   /* ---------- Nueva contraseña (enlace del correo de recuperación) ---------- */
   function viewNewPassword() {
     if (!state.user) {
-      return mount(`<div class="wrap section"><div class="empty"><h1>El enlace ya no sirve</h1><p>Pide otro enlace desde «¿Olvidaste tu contraseña?» en la pantalla de ingreso.</p><a class="btn btn--cafe" href="#/ingresar">Ir a Ingresar</a></div></div>`, "Nueva contraseña");
+      return mount(`<div class="wrap section"><div class="empty">${emptyArt("alert")}<h1>El enlace ya no sirve</h1><p>Pide otro enlace desde «¿Olvidaste tu contraseña?» en la pantalla de ingreso.</p><a class="btn btn--cafe" href="#/ingresar">Ir a Ingresar</a></div></div>`, "Nueva contraseña");
     }
     mount(`<div class="wrap"><div class="auth"><div class="auth__box">
       <h1>Crea una nueva contraseña</h1>
@@ -1272,7 +1310,26 @@
     const o = state.lastOrder;
     if (!o || o.numero !== r.arg) return viewNotFound();
     mount(`<div class="wrap"><div class="done">
-      <div class="done__check">${ICON.check}</div>
+      <svg class="crowncap" viewBox="0 0 220 170" aria-hidden="true" focusable="false">
+        <ellipse cx="110" cy="156" rx="78" ry="8" fill="#E6DBC8"/>
+        <g class="crowncap__cap">
+          <path d="M42 124C42 82 72 58 108 58s64 24 64 66z" fill="#4A2E20"/>
+          <path d="M108 58c-8 20-10 42-8 66M108 58c14 18 22 40 24 66" fill="none" stroke="#6b4a37" stroke-width="2"/>
+          <circle cx="108" cy="58" r="5" fill="#B59F7E"/>
+          <rect x="40" y="118" width="134" height="9" rx="4.5" fill="#2e1b12"/>
+          <path d="M42 126c42 2 104 6 156 18-10 10-62 10-124-2-19-4-32-9-32-16z" fill="#6b4a37"/>
+          <path d="M92 98l7 6 9-11 9 11 7-6-3 15H95z" fill="#B59F7E"/>
+        </g>
+        <g class="crowncap__crown">
+          <path d="M80 50l-6-30 20 16 14-24 14 24 20-16-6 30z" fill="#E2B33C" stroke="#9c7414" stroke-width="2" stroke-linejoin="round"/>
+          <rect x="79" y="48" width="58" height="8" rx="3" fill="#c9971f"/>
+          <circle cx="74" cy="20" r="4" fill="#E2B33C"/><circle cx="108" cy="12" r="4" fill="#E2B33C"/><circle cx="142" cy="20" r="4" fill="#E2B33C"/>
+          <circle cx="108" cy="36" r="4" fill="#6B3FA0"/>
+        </g>
+        <g class="crowncap__spark" fill="#E2B33C">
+          <path d="M40 40l3 8 8 3-8 3-3 8-3-8-8-3 8-3z"/><path d="M180 30l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/><path d="M190 90l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/>
+        </g>
+      </svg>
       <h1>¡Pedido reservado!</h1>
       <p>Tu pedido <strong>${esc(o.numero)}</strong> está reservado. Te escribiremos a <strong>${esc(o.email)}</strong> cuando esté listo para retirar.</p>
       <section class="panel" aria-labelledby="resTitle">
@@ -1304,7 +1361,7 @@
         ${state.user ? `<p>${esc(state.user.nombre)} ${esc(state.user.apellido)} · ${esc(state.user.email)} · <a class="link" href="#/salir">Cerrar sesión</a></p>` : ""}
       </div>`;
     if (!state.user) {
-      return mount(`<div class="wrap">${head}<div class="empty"><h2>Ingresa para ver tus pedidos</h2><p>Tus reservas se guardan en tu cuenta.</p><a class="btn btn--cafe" href="#/ingresar?next=pedidos">Ingresar</a></div></div>`, "Mis pedidos");
+      return mount(`<div class="wrap">${head}<div class="empty">${emptyArt("user")}<h2>Ingresa para ver tus pedidos</h2><p>Tus reservas se guardan en tu cuenta.</p><a class="btn btn--cafe" href="#/ingresar?next=pedidos">Ingresar</a></div></div>`, "Mis pedidos");
     }
     mount(`<div class="wrap">${head}<p class="hint" role="status" id="ordersStatus">Cargando tus pedidos…</p><div id="ordersList"></div></div>`, "Mis pedidos");
     let list;
@@ -1328,7 +1385,7 @@
         ${o.estado === "reservado" ? `<button type="button" class="btn btn--borde btn--sm" data-action="cancelOrder" data-oid="${o.id}" data-num="${esc(o.numero)}">Cancelar reserva</button>` : ""}
       </li>`;
     }).join("")}</ul>`
-      : `<div class="empty"><h2>Todavía no tienes pedidos</h2><p>Cuando reserves, tus pedidos aparecerán aquí.</p><a class="btn btn--cafe" href="#/catalogo">Ver catálogo</a></div>`;
+      : `<div class="empty">${emptyArt("bag")}<h2>Todavía no tienes pedidos</h2><p>Cuando reserves, tus pedidos aparecerán aquí.</p><a class="btn btn--cafe" href="#/catalogo">Ver catálogo</a></div>`;
 
     app.onclickDetail = async a => {
       if (a.dataset.action !== "cancelOrder") return;
@@ -1378,7 +1435,7 @@
   }
 
   function viewNotFound() {
-    mount(`<div class="wrap section"><div class="empty"><h1>No encontramos esta página</h1><p>Puede que el enlace esté mal escrito o que el pedido ya no exista.</p><a class="btn btn--cafe" href="#/catalogo">Ir al catálogo</a></div></div>`, "No encontrada");
+    mount(`<div class="wrap section"><div class="empty">${emptyArt("question")}<h1>No encontramos esta página</h1><p>Puede que el enlace esté mal escrito o que el pedido ya no exista.</p><a class="btn btn--cafe" href="#/catalogo">Ir al catálogo</a></div></div>`, "No encontrada");
   }
 
   /* ---------- Eventos globales ---------- */
@@ -1472,7 +1529,7 @@
       await loadUser(await DB.sesion());
     } catch (e) {
       console.error(e);
-      app.innerHTML = `<div class="wrap section"><div class="empty"><h1 tabindex="-1">No pudimos conectar con la tienda</h1><p>Revisa tu conexión a internet e intenta de nuevo.</p><button type="button" class="btn btn--cafe" id="retryInit">Reintentar</button></div></div>`;
+      app.innerHTML = `<div class="wrap section"><div class="empty">${emptyArt("alert")}<h1 tabindex="-1">No pudimos conectar con la tienda</h1><p>Revisa tu conexión a internet e intenta de nuevo.</p><button type="button" class="btn btn--cafe" id="retryInit">Reintentar</button></div></div>`;
       $("h1", app).focus();
       $("#retryInit").addEventListener("click", init);
       return;
