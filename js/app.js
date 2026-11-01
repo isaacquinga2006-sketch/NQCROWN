@@ -91,6 +91,8 @@
   // cambian según el tipo: «ok» (verde, se hizo), «info» (café, dato o algo que falta) y «error» (rojo).
   // Si es de una gorra muestra su foto, un título corto y el detalle. Dura 3 s (la barra de abajo
   // muestra el tiempo), se pausa con el mouse o el foco y se cierra con «Esc» o con ✕.
+  // Si trae un botón (p. ej. «Avísame cuando lleguen más») no se va solo: queda hasta que la persona
+  // lo use o lo cierre, así hay tiempo de llegar con el teclado o el lector de pantalla (WCAG 2.2.1).
   let toastTimer, toastAction = null, toastMs = 3000;
   const TOAST_ICON = { ok: "check", info: "alert", error: "alert" };
   function toast(msg, action, type = "ok", extra = {}) { // extra: { detalle, img }
@@ -121,8 +123,12 @@
   }
   // La barra de tiempo vuelve a empezar con el reloj y se congela mientras está en pausa
   function restartToast() {
-    clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, toastMs);
-    const t = $("#toast"); t.classList.remove("is-paused", "is-timing"); void t.offsetWidth; t.classList.add("is-timing");
+    clearTimeout(toastTimer);
+    const t = $("#toast"); t.classList.remove("is-paused", "is-timing");
+    t.classList.toggle("is-sticky", !!toastAction);
+    if (toastAction) return; // con botón: sin reloj
+    toastTimer = setTimeout(hideToast, toastMs);
+    void t.offsetWidth; t.classList.add("is-timing");
   }
   const pauseToast = () => { clearTimeout(toastTimer); $("#toast").classList.add("is-paused"); };
   $("#toast").addEventListener("mouseenter", pauseToast);
@@ -517,6 +523,8 @@
     if (o === "a") list.sort((a, b) => a.precio - b.precio);
     if (o === "z") list.sort((a, b) => b.precio - a.precio);
     if (o === "n") list.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+    if (o === "r") list.sort((a, b) => b.nuevo - a.nuevo || b.id - a.id); // nuevas primero, luego las últimas agregadas
+    if (o === "o") list.sort((a, b) => (b.antes ? pctOff(b) : 0) - (a.antes ? pctOff(a) : 0) || a.precio - b.precio);
 
     const pages = Math.max(1, Math.ceil(list.length / STORE.porPagina));
     page = Math.min(page, pages);
@@ -568,7 +576,7 @@
           <div class="chips" role="group" aria-label="Mostrar">${chip("all")}${chip("nuevo")}${chip("oferta")}${chip("fav")}</div>
           <button type="button" class="btn btn--borde filters-toggle" data-action="togglefilters" aria-expanded="${openPanel}" aria-controls="filtros">Filtros${nSel ? ` (${nSel})` : ""}</button>
           <label class="sortlabel" for="sort"><span>Ordenar por</span>
-          <select id="sort">${opt("d", "Destacadas")}${opt("a", "Precio: menor a mayor")}${opt("z", "Precio: mayor a menor")}${opt("n", "Nombre: A a Z")}</select></label>
+          <select id="sort">${opt("d", "Destacadas")}${opt("r", "Más nuevas")}${opt("o", "Mayor descuento")}${opt("a", "Precio: menor a mayor")}${opt("z", "Precio: mayor a menor")}${opt("n", "Nombre: A a Z")}</select></label>
         </div>
         <div class="catalog">
           <aside class="filters ${openPanel ? "is-open" : ""}" id="filtros" aria-labelledby="filtersTitle">
@@ -1607,8 +1615,61 @@
     }
   });
 
-  $("#searchForm").addEventListener("submit", e => { e.preventDefault(); setCatalogQuery({ q: $("#searchInput").value.trim(), f: "all", p: 1 }); });
-  $("#searchInput").addEventListener("input", e => {
+  /* ---------- Sugerencias del buscador (patrón «combobox» con lista) ---------- */
+  // Desde 2 letras aparecen hasta 6 gorras con foto y precio, y al final «Ver todos los resultados».
+  // ↑ ↓ recorren la lista, Enter abre la marcada (sin marcar, busca todo) y Esc cierra la lista.
+  const sInput = $("#searchInput"), sList = $("#searchList");
+  let sugIdx = -1;
+  const textoBusqueda = p => [p.nombre, p.modelo, p.tipo, p.color, p.marca, p.equipo].join(" ").toLowerCase();
+  function closeSug() {
+    sList.hidden = true; sList.innerHTML = ""; sugIdx = -1;
+    sInput.setAttribute("aria-expanded", "false"); sInput.removeAttribute("aria-activedescendant");
+  }
+  function showSug() {
+    const term = sInput.value.trim(), t = term.toLowerCase();
+    if (t.length < 2 || !PRODUCTS.length) return closeSug();
+    const all = PRODUCTS.filter(p => textoBusqueda(p).includes(t))
+      .sort((a, b) => b.nombre.toLowerCase().startsWith(t) - a.nombre.toLowerCase().startsWith(t));
+    const top = all.slice(0, 6);
+    sList.innerHTML = all.length
+      ? top.map((p, i) => `<li role="option" id="sug-${i}" class="sug__opt" data-id="${p.id}" aria-selected="false">
+          <img src="${esc(p.img)}" alt="" width="40" height="40"><span class="sug__name">${esc(p.nombre)}</span><span class="sug__price">${money(p.precio)}</span></li>`).join("")
+        + `<li role="option" id="sug-${top.length}" class="sug__opt sug__all" data-all="1" aria-selected="false">Ver ${all.length === 1 ? "el resultado" : `los ${all.length} resultados`} para «${esc(term)}»</li>`
+      : `<li role="option" class="sug__none" aria-disabled="true">No encontramos gorras para «${esc(term)}». Prueba con un equipo, un color o un modelo.</li>`;
+    sugIdx = -1; sInput.removeAttribute("aria-activedescendant");
+    sList.hidden = false; sInput.setAttribute("aria-expanded", "true");
+    announce(all.length ? `${plural(all.length, "sugerencia")}. Usa las flechas para elegir.` : "Sin sugerencias");
+  }
+  function markSug(i) {
+    const opts = $$(".sug__opt", sList);
+    if (!opts.length) return;
+    sugIdx = (i + opts.length) % opts.length;
+    opts.forEach((o, k) => { o.setAttribute("aria-selected", k === sugIdx); o.classList.toggle("on", k === sugIdx); });
+    sInput.setAttribute("aria-activedescendant", opts[sugIdx].id);
+    opts[sugIdx].scrollIntoView({ block: "nearest" });
+  }
+  function pickSug(o) {
+    if (!o) return;
+    if (o.dataset.all) return $("#searchForm").requestSubmit();
+    closeSug(); sInput.value = ""; sInput.blur(); go("#/producto/" + o.dataset.id);
+  }
+  sInput.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (sList.hidden) showSug();
+      markSug(sugIdx < 0 && e.key === "ArrowUp" ? -1 : sugIdx + (e.key === "ArrowDown" ? 1 : -1));
+    }
+    if (e.key === "Enter" && !sList.hidden && sugIdx >= 0) { e.preventDefault(); pickSug($$(".sug__opt", sList)[sugIdx]); }
+    if (e.key === "Escape" && !sList.hidden) { e.preventDefault(); e.stopPropagation(); closeSug(); }
+  });
+  sList.addEventListener("mousedown", e => e.preventDefault()); // el foco se queda en el buscador
+  sList.addEventListener("click", e => pickSug(e.target.closest(".sug__opt")));
+  $("#searchForm").addEventListener("focusout", e => { if (!$("#searchForm").contains(e.relatedTarget)) closeSug(); });
+  window.addEventListener("hashchange", closeSug);
+
+  $("#searchForm").addEventListener("submit", e => { e.preventDefault(); closeSug(); setCatalogQuery({ q: sInput.value.trim(), f: "all", p: 1 }); });
+  sInput.addEventListener("input", e => {
+    showSug();
     if (parseHash().name === "catalogo") setCatalogQuery({ q: e.target.value.trim(), p: 1 }, true);
   });
   // Atajos: «/» enfoca el buscador; «Esc» lo borra (flexibilidad y eficiencia de uso).
