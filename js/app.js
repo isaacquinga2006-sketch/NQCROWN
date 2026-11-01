@@ -58,9 +58,6 @@
   const inCartOf = id => cartItems().filter(i => i.p.id === id).reduce((n, i) => n + i.qty, 0);
   const tallaTexto = t => t ? ` · talla ${t}` : "";
   const MAX_PEDIDO = 10; // máximo de unidades de una misma gorra por pedido
-  const quedanTexto = n => `De esta gorra nos ${n === 1 ? "queda 1 unidad" : `quedan ${n} unidades`}`;
-  // Por qué no se pueden agregar más: o se acaban las que hay, o se llega al máximo por pedido
-  const topeTexto = p => p.stock <= MAX_PEDIDO ? `${quedanTexto(p.stock)}` : `Puedes llevar hasta ${MAX_PEDIDO} unidades de esta gorra por pedido`;
   // Todas las fotos de la gorra (las del catálogo de respaldo solo tienen una)
   const fotos = p => p.imgs?.length ? p.imgs : [{ url: p.img, alt: p.alt }];
   const cartCount = () => cartItems().reduce((n, i) => n + i.qty, 0);
@@ -144,10 +141,13 @@
   function addToCart(id, qty = 1, btn, talla = "") {
     const p = byId(id), key = DB.cartKey(id, talla);
     const before = state.cart[key] || 0;
-    const tope = Math.max(0, Math.min(MAX_PEDIDO, p.stock) - (inCartOf(p.id) - before)); // cuenta las otras tallas de la misma gorra
+    const otras = inCartOf(p.id) - before; // la misma gorra en otras tallas
+    const pasaStock = before + qty + otras > p.stock, pasaMax = before + qty + otras > MAX_PEDIDO;
+    const nuevo = Math.min(before + qty, p.stock - otras, MAX_PEDIDO - otras);
     const ver = { label: "Ver carrito", run: () => go("#/carrito") };
-    if (before >= tope) return toastGorra(p.stock <= MAX_PEDIDO ? `Ya tienes en tu carrito todas las que nos quedan (${p.stock})` : `Ya tienes ${MAX_PEDIDO}, el máximo por pedido`, p, talla, ver, "info");
-    state.cart[key] = Math.min(tope, before + qty);
+    const avisoTope = () => pasaStock && p.stock < MAX_PEDIDO ? toastStock(p) : toastGorra(`Máximo ${MAX_PEDIDO} unidades por gorra`, p, talla, ver, "info");
+    if (nuevo <= before) return avisoTope();
+    state.cart[key] = nuevo;
     persist(); updateHeader(); syncItem(key);
     const bump = () => { const b = $("#cartBtn"); b.classList.remove("bump"); void b.offsetWidth; b.classList.add("bump"); };
     flyToCart(btn && (btn.closest(".card")?.querySelector(".card__img img") || $(".gallery__main img")), bump);
@@ -156,7 +156,7 @@
       btn.classList.add("is-done"); btn.innerHTML = `${ICON.check} Agregada`;
       setTimeout(() => { if (btn.isConnected) { btn.classList.remove("is-done"); btn.innerHTML = old; } }, 1400);
     }
-    if (before + qty > tope) toastGorra(`${topeTexto(p)}: agregamos ${plural(tope - before, "unidad", "unidades")}`, p, talla, ver, "info");
+    if (pasaStock || pasaMax) avisoTope();
     else setTimeout(() => openDrawer(key, btn), reduceMotion.matches ? 0 : 560); // después de que la foto llega al carrito
   }
 
@@ -243,7 +243,11 @@
     setQty(key, 0); viewCart();
     toastGorra("Quitada del carrito", byId(id), talla, { label: "Deshacer", run: () => { setQty(key, qty); viewCart(); announce(`${name} volvió al carrito`); } }, "info");
   }
-  // Avísame cuando vuelva: con sesión se guarda en la base y llega un correo cuando hay stock
+  // Si piden más de las que hay: cuántas quedan y el botón para que les avisemos cuando lleguen más
+  const toastStock = p => toast(`De este producto nos ${p.stock === 1 ? "queda 1" : `quedan ${p.stock}`} en stock`,
+    { label: "Avísame cuando lleguen más", run: () => state.avisos.includes(p.id) ? toast("Ya te avisaremos cuando lleguen más", null, "info", { img: p.img, detalle: p.nombre }) : toggleAviso(p.id) },
+    "info", { img: p.img, detalle: p.nombre });
+  // Avísame cuando vuelva: con sesión se guarda en la base y llega un correo cuando hay más stock
   async function toggleAviso(id, btn) {
     id = Number(id);
     const p = byId(id);
@@ -252,13 +256,13 @@
       return;
     }
     const on = !state.avisos.includes(id);
-    btn.disabled = true;
+    if (btn) btn.disabled = true;
     try {
       if (on) await DB.pedirAviso(id, state.user.email); else await DB.quitarAviso(state.user.id, id);
       state.avisos = on ? [...state.avisos, id] : state.avisos.filter(a => a !== id);
       $$(`[data-action="notify"][data-id="${id}"]`).forEach(b => { b.outerHTML = notifyBtn(p, b.classList.contains("btn--block")); });
-      toast(on ? "Te avisaremos cuando vuelva" : "Quitaste el aviso", null, on ? "ok" : "info", { img: p.img, detalle: on ? `${p.nombre} · correo a ${state.user.email}` : p.nombre });
-    } catch (e) { btn.disabled = false; dbError(e, "No pudimos guardar tu aviso. Intenta de nuevo."); }
+      toast(on ? (p.stock ? "Te avisaremos cuando lleguen más" : "Te avisaremos cuando vuelva") : "Quitaste el aviso", null, on ? "ok" : "info", { img: p.img, detalle: on ? `${p.nombre} · correo a ${state.user.email}` : p.nombre });
+    } catch (e) { if (btn) btn.disabled = false; dbError(e, "No pudimos guardar tu aviso. Intenta de nuevo."); }
   }
   const notifyBtn = (p, block = true) => {
     const on = state.avisos.includes(p.id);
@@ -844,12 +848,12 @@
     let qty = 1, view = 0;
     const fav = state.favs.includes(p.id);
     const inCart = inCartOf(p.id);
-    let max = Math.min(MAX_PEDIDO, p.stock);
+    const max = MAX_PEDIDO;
     const gal = galleryOf(p);
     const tallas = p.talla ? TALLAS[p.talla] || [] : [];
     const related = PRODUCTS.filter(x => x.id !== p.id && x.stock && x.tipo === p.tipo)
       .concat(PRODUCTS.filter(x => x.id !== p.id && x.stock && x.tipo !== p.tipo)).slice(0, 4);
-    const qtyHint = () => `${quedanTexto(p.stock)}${p.stock > MAX_PEDIDO ? ` · máximo ${MAX_PEDIDO} por pedido` : ""}.${inCartOf(p.id) ? ` Ya tienes ${inCartOf(p.id)} en tu carrito.` : ""}`;
+    const qtyHint = () => `Máximo ${MAX_PEDIDO} unidades por gorra.${inCartOf(p.id) ? ` Ya tienes ${inCartOf(p.id)} en tu carrito.` : ""}`;
     const favBtn = `<button type="button" class="fav ${fav ? "on" : ""}" data-action="fav" data-id="${p.id}" aria-pressed="${fav}" aria-label="${esc(favLabel(p, fav))}" title="${fav ? "Quitar de favoritas" : "Guardar en favoritas"}">${ICON.heart}</button>`;
 
     const sizeHTML = tallas.length ? `<fieldset class="sizes field" data-f="talla" aria-describedby="h_talla m_talla">
@@ -865,7 +869,7 @@
             <output id="dqty" aria-live="polite" aria-label="Cantidad">1</output>
             <button type="button" data-action="dqty" data-d="1" aria-label="Agregar una unidad" ${max <= 1 ? "disabled" : ""}>+</button>
           </div>
-          <p class="hint ${p.stock <= 3 ? "hint--low" : ""}" id="qtyHint">${qtyHint()}</p>
+          <p class="hint" id="qtyHint">${qtyHint()}</p>
           <div class="buyrow">
             <button type="button" class="btn btn--cafe" data-action="addDetail" data-id="${p.id}">${ICON.cart} Agregar al carrito</button>
             ${favBtn}
@@ -916,6 +920,8 @@
 
     app.onclickDetail = action => {
       if (action.dataset.action === "dqty") {
+        // Al pasar de las que hay: aviso con cuántas quedan (el + no se bloquea, para poder avisar)
+        if (Number(action.dataset.d) > 0 && qty + inCartOf(p.id) >= p.stock) return toastStock(p);
         qty = Math.min(max, Math.max(1, qty + Number(action.dataset.d)));
         $("#dqty").textContent = qty;
         const [minus, plus] = $$('[data-action="dqty"]');
@@ -946,16 +952,12 @@
         $("#galCount").textContent = `${view + 1} de ${gal.length}`;
       }
     };
-    // El stock se vuelve a leer de la base: otra persona pudo reservar desde que se abrió la tienda
+    // El stock se vuelve a leer de la base (otra persona pudo reservar) para avisar bien cuántas quedan
     DB.stock(p.id).then(actual => {
       if (actual == null || actual === p.stock || parseHash().arg !== String(p.id)) return;
       const antes = p.stock; p.stock = actual;
       if (!actual || !antes) return viewProduct(r); // se agotó o volvió: cambia la pantalla
-      max = Math.min(MAX_PEDIDO, actual); qty = Math.min(qty, max);
-      $("#dqty").textContent = qty;
-      const [minus, plus] = $$('[data-action="dqty"]');
-      minus.disabled = qty === 1; plus.disabled = qty >= max;
-      $("#qtyHint").textContent = qtyHint(); $("#qtyHint").classList.toggle("hint--low", actual <= 3);
+      if (qty > actual) { qty = actual; $("#dqty").textContent = qty; $('[data-action="dqty"][data-d="-1"]').disabled = qty === 1; }
     }).catch(e => console.error(e));
     // Al elegir talla se quita el error
     $(".sizes")?.addEventListener("change", () => showErrors($(".info", app), {}, null));
@@ -996,7 +998,7 @@
             <div class="qty" role="group" aria-label="Cantidad de ${name}">
               <button type="button" data-action="qty" data-id="${esc(key)}" data-d="-1" aria-label="Quitar una unidad de ${name}" ${qty <= 1 ? "disabled" : ""}>−</button>
               <span>${qty}</span>
-              <button type="button" data-action="qty" data-id="${esc(key)}" data-d="1" aria-label="Agregar una unidad de ${name}" ${qty >= Math.min(10, p.stock) ? "disabled" : ""}>+</button>
+              <button type="button" data-action="qty" data-id="${esc(key)}" data-d="1" aria-label="Agregar una unidad de ${name}" ${qty >= MAX_PEDIDO ? "disabled" : ""}>+</button>
             </div>
             <div class="line__total"><span class="sr-only">Precio: </span>${money(p.precio * qty)}</div>
           </li>`; }).join("")}
@@ -1582,7 +1584,11 @@
       }
       case "page": setCatalogQuery({ p: Number(a.dataset.p) }); break;
       case "scroll": $("#catalogo-lista").scrollIntoView(); $("#catTitle").focus({ preventScroll: true }); break;
-      case "qty": setQty(id, (state.cart[id] || 0) + Number(a.dataset.d)); viewCart(); announce(`${lineName(id)}: ${plural(state.cart[id], "unidad", "unidades")}. Total ${money(totals().total)}`); break;
+      case "qty": {
+        const p = byId(DB.splitKey(id)[0]);
+        if (Number(a.dataset.d) > 0 && inCartOf(p.id) >= p.stock) { toastStock(p); break; } // ya tiene todas las que quedan
+        setQty(id, (state.cart[id] || 0) + Number(a.dataset.d)); viewCart(); announce(`${lineName(id)}: ${plural(state.cart[id], "unidad", "unidades")}. Total ${money(totals().total)}`); break;
+      }
       case "notify": toggleAviso(id, a); break;
       case "megamenu": toggleMega(a); break;
       case "remove": removeItem(id); break;
