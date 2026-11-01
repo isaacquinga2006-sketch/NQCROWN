@@ -87,7 +87,7 @@
       return rows.reduce((m, t) => ((m[t.sistema] ||= []).push({ etiqueta: t.etiqueta, medida: t.medida }), m), {});
     },
     async local() {
-      const rows = ok(await sb.from("locales").select("id, nombre, direccion, enlace_mapa, horario").order("id").limit(1));
+      const rows = ok(await sb.from("locales").select("id, nombre, direccion, enlace_mapa, horario, metodos_pago").order("id").limit(1));
       return rows[0] || null;
     },
     async validarCodigo(codigo) {

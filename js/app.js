@@ -69,6 +69,19 @@
     return { subtotal, descuento, total: +(subtotal - descuento).toFixed(2) };
   }
   const localTexto = () => [STORE.local.nombre, STORE.local.direccion].filter(Boolean).join(" · ");
+  // Formas de pago del local (vienen de la base): «efectivo, tarjeta… o DeUna» y en chips con ícono
+  const pagos = () => STORE.local.metodos_pago || [];
+  const pagosTexto = () => { const l = pagos().map(m => m === "DeUna" ? m : m.toLowerCase()); return l.length > 1 ? `${l.slice(0, -1).join(", ")} o ${l.at(-1)}` : l.join(""); };
+  const PAGO_ICON = {
+    efectivo: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9v.01M18 15v.01"/>',
+    tarjeta: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+    transferencia: '<path d="M3 10 12 4l9 6M5 10v8M19 10v8M9.5 10v8M14.5 10v8M3 20h18"/>',
+    deuna: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/>'
+  };
+  const pagosHTML = () => `<ul class="paylist" aria-label="Formas de pago en el local">${pagos().map(m => {
+    const k = Object.keys(PAGO_ICON).find(k => m.toLowerCase().replace(/\s/g, "").includes(k)) || "efectivo";
+    return `<li><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${PAGO_ICON[k]}</svg>${esc(m)}</li>`;
+  }).join("")}</ul>`;
   const limiteTexto = iso => fmtDate(new Date(iso + "T12:00:00")); // «viernes, 30 de octubre»
 
   // Datos de la cuenta: perfil, favoritas y carrito. El carrito armado sin sesión se suma al de la cuenta.
@@ -1016,7 +1029,7 @@
         <aside class="panel" aria-labelledby="sumTitle">
           <h2 id="sumTitle">Resumen del pedido</h2>
           ${summaryRows(t)}
-          <p class="notice notice--small">${ICON.store}<span>No hacemos envíos: retiras tu pedido y pagas en ${esc(localTexto())}.</span></p>
+          <p class="notice notice--small">${ICON.store}<span>No hacemos envíos: retiras tu pedido y pagas en ${esc(localTexto())} con ${esc(pagosTexto())}.</span></p>
           <form class="coupon" id="couponForm" novalidate>
             <label class="label" for="couponInput">Código de descuento</label>
             <div class="coupon__row">
@@ -1344,6 +1357,10 @@
                 <li>Te enviamos un correo cuando tu pedido esté listo.</li>
                 <li>Vas al local, das tu número de pedido y tu nombre.</li>
                 <li>Pagas ahí al retirar. No pagas nada en línea.</li>
+              </ul>
+              <p class="paylist__title">Formas de pago en el local</p>
+              ${pagosHTML()}
+              <ul class="pickup__steps">
                 <li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong> Si reservas hoy, tienes hasta el ${esc(limiteTexto(isoDate(addDays(new Date(), 3))))}.</li>
               </ul>
               <label class="check check--box" for="f_acepto" data-label="Confirmación de retiro"><input type="checkbox" name="acepto" id="f_acepto" aria-describedby="m_acepto"> Entiendo que debo retirar y pagar el pedido en el local.</label>
@@ -1358,7 +1375,7 @@
           <a class="link small" href="#/carrito">Cambiar productos</a>
           <div style="margin-top:12px">${summaryRows(t)}</div>
           <button class="btn btn--verde btn--block btn--lg" form="checkoutForm" id="confirmBtn">Confirmar reserva · ${money(t.total)}</button>
-          <p class="secure">Pagas ${money(t.total)} al retirar en el local.</p>
+          <p class="secure">Pagas ${money(t.total)} al retirar en el local: ${esc(pagosTexto())}.</p>
         </aside>
       </div></div>`, "Reservar pedido");
 
@@ -1460,7 +1477,7 @@
           <div class="row"><dt>A nombre de</dt><dd>${esc(o.cliente)}</dd></div>
           <div class="row"><dt>Retiro</dt><dd style="text-align:right">${esc(localTexto())}<br><span class="sm">${esc(STORE.local.horario)}</span></dd></div>
           <div class="row"><dt>Retira hasta el</dt><dd>${esc(limiteTexto(o.fecha_limite))}</dd></div>
-          <div class="row"><dt>Pago</dt><dd>Al retirar, en el local</dd></div>
+          <div class="row"><dt>Pago</dt><dd style="text-align:right">Al retirar, en el local<br><span class="sm">${esc(pagos().join(" · "))}</span></dd></div>
           ${o.subtotal != null ? `<div class="row"><dt>Subtotal</dt><dd>${money(o.subtotal)}</dd></div>` : ""}
           ${o.descuento ? `<div class="row row--desc"><dt>Descuento${o.codigo ? ` (${esc(o.codigo.code)}, ${o.codigo.pct} %)` : ""}</dt><dd>−${money(o.descuento)}</dd></div>` : ""}
           <div class="row row--total"><dt>Total a pagar</dt><dd>${money(o.total)}</dd></div>
@@ -1531,7 +1548,7 @@
         <dt>¿Puedo cancelar una reserva?</dt><dd>Sí. Ingresa a tu cuenta, abre «Mis pedidos» y presiona «Cancelar reserva».</dd>
       </dl>`],
     retiro: ["Retiro en el local", `<p>No hacemos envíos. Reservas en línea y retiras en <strong>${esc(localTexto())}</strong>.</p>
-      <ul><li><strong>Horario:</strong> ${esc(STORE.local.horario)}.</li><li>Te avisamos por correo cuando tu pedido está listo.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong></li></ul>`],
+      <ul><li><strong>Horario:</strong> ${esc(STORE.local.horario)}.</li><li>Te avisamos por correo cuando tu pedido está listo.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><strong>Formas de pago:</strong> ${esc(pagosTexto())}. No hay pagos en línea.</li><li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong></li></ul>`],
     devoluciones: ["Devoluciones", "<p>Tienes 15 días desde que retiras tu pedido para devolverlo en el local. La gorra debe estar sin usar y con sus etiquetas.</p>"],
     contacto: ["Contacto", "<p>Correo: <strong>isaacquinga2006@gmail.com</strong></p><p>Horario: lunes a sábado, de 9:00 a 18:00.</p>"],
     accesibilidad: ["Accesibilidad", `<p>Queremos que todas las personas puedan comprar en NQ Crown.</p>

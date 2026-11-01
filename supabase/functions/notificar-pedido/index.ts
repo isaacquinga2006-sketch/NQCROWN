@@ -20,7 +20,7 @@ type Pedido = {
   numero: string; nombre: string; apellido: string; correo: string;
   subtotal: number; descuento: number; total: number; fecha_limite: string;
   codigos_descuento: { codigo: string; porcentaje: number } | null;
-  locales: { nombre: string; direccion: string; horario: string } | null;
+  locales: { nombre: string; direccion: string; horario: string; metodos_pago: string[] } | null;
   pedido_items: { nombre_producto: string; precio_unitario: number; cantidad: number; talla: string | null }[];
 };
 
@@ -78,7 +78,7 @@ function correoHTML(tipo: string, p: Pedido) {
               ${fila("A nombre de", esc(`${p.nombre} ${p.apellido}`))}
               ${local ? fila("Retiro", esc(local.nombre), esc([local.direccion, local.horario].filter(Boolean).join(" · "))) : ""}
               ${reservado ? fila("Retira hasta el", esc(limite)) : ""}
-              ${fila("Pago", "Al retirar, en el local")}
+              ${fila("Pago", "Al retirar, en el local", esc((local?.metodos_pago || []).join(" · ")))}
             </table>
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px">${gorras}</table>
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:15px;margin-top:4px">
@@ -109,7 +109,7 @@ function correoTexto(tipo: string, p: Pedido) {
     + `Número de pedido: ${p.numero}\nA nombre de: ${p.nombre} ${p.apellido}\n`
     + (l ? `Retiro: ${[l.nombre, l.direccion, l.horario].filter(Boolean).join(" · ")}\n` : "")
     + (tipo === "reservado" ? `Retira hasta el: ${fecha(p.fecha_limite)}\n` : "")
-    + `Pago: al retirar, en el local\n\n${items}\nSubtotal: ${money(p.subtotal)}\n`
+    + `Pago: al retirar, en el local${l?.metodos_pago?.length ? ` (${l.metodos_pago.join(", ")})` : ""}\n\n${items}\nSubtotal: ${money(p.subtotal)}\n`
     + (Number(p.descuento) > 0 ? `Descuento: -${money(p.descuento)}\n` : "")
     + `Total a pagar: ${money(p.total)}\n\nVer mis pedidos: ${TIENDA}#/pedidos\n`;
 }
@@ -129,7 +129,7 @@ Deno.serve(async req => {
   if (!n) return json({ ok: true, omitida: true });
 
   const { data: p, error } = await sb.from("pedidos")
-    .select("numero, nombre, apellido, correo, subtotal, descuento, total, fecha_limite, codigos_descuento(codigo, porcentaje), locales(nombre, direccion, horario), pedido_items(nombre_producto, precio_unitario, cantidad, talla)")
+    .select("numero, nombre, apellido, correo, subtotal, descuento, total, fecha_limite, codigos_descuento(codigo, porcentaje), locales(nombre, direccion, horario, metodos_pago), pedido_items(nombre_producto, precio_unitario, cantidad, talla)")
     .eq("id", n.pedido_id).single();
   if (error || !p) { await marcar(n.id, "error", "No se encontró el pedido"); return json({ error: "Pedido no encontrado" }, 404); }
 

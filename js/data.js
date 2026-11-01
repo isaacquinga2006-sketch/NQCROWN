@@ -56,7 +56,8 @@ window.STORE = {
   local: {
     nombre: "Local NQ Crown",
     direccion: "",            // escribe aquí la dirección del local
-    horario: "Lunes a sábado, de 9:00 a 18:00"
+    horario: "Lunes a sábado, de 9:00 a 18:00",
+    metodos_pago: ["Efectivo", "Tarjeta de débito o crédito", "Transferencia bancaria", "DeUna"]
   },
   cupones: { CROWN10: 0.10 },
   porPagina: 8,

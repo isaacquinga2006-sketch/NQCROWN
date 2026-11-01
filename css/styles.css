@@ -767,3 +767,9 @@ body.has-drawer { overflow: hidden; }
 .sug__all { justify-content: center; font-weight: 600; color: var(--cafe); text-decoration: underline; border-top: 1px solid var(--beige-claro); border-radius: 0 0 8px 8px; }
 .sug__none { padding: 10px 8px; color: var(--suave); font-size: .92rem; }
 
+/* Formas de pago del local */
+.paylist__title { margin: 14px 0 8px; font-weight: 600; font-size: 14px; }
+.paylist { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.paylist li { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1.5px solid var(--beige); border-radius: 999px; background: var(--blanco); font-size: 14px; color: var(--texto); }
+.paylist svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--cafe); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
