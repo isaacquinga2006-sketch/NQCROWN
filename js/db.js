@@ -131,12 +131,15 @@
       ok(await sb.auth.updateUser({ password }));
     },
     async perfil(id) {
-      return ok(await sb.from("perfiles").select("nombre, apellido, telefono").eq("id", id).maybeSingle());
+      return ok(await sb.from("perfiles").select("nombre, apellido, telefono, acepta_ofertas").eq("id", id).maybeSingle());
     },
     async guardarTelefono(id, telefono) {
       ok(await sb.from("perfiles").update({ telefono }).eq("id", id));
     },
-    async actualizarPerfil(id, datos) { // { nombre, apellido, telefono }
+    async guardarOfertas(id, acepta_ofertas) {
+      ok(await sb.from("perfiles").update({ acepta_ofertas }).eq("id", id));
+    },
+    async actualizarPerfil(id, datos) { // { nombre, apellido, telefono, acepta_ofertas }
       ok(await sb.from("perfiles").update(datos).eq("id", id));
     },
 

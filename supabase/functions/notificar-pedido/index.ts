@@ -16,7 +16,8 @@ const fecha = (iso: string) => new Date(iso + "T12:00:00Z")
   .toLocaleDateString("es-EC", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
 
 type Pedido = {
-  numero: string; nombre: string; subtotal: number; descuento: number; total: number; fecha_limite: string;
+  numero: string; nombre: string; apellido: string; correo: string;
+  subtotal: number; descuento: number; total: number; fecha_limite: string;
   codigos_descuento: { codigo: string; porcentaje: number } | null;
   locales: { nombre: string; direccion: string; horario: string } | null;
   pedido_items: { nombre_producto: string; precio_unitario: number; cantidad: number; talla: string | null }[];
@@ -36,49 +37,80 @@ function textos(tipo: string, p: Pedido) {
     parrafo: `La reserva <strong>${esc(p.numero)}</strong> se canceló y las gorras volvieron a estar disponibles. Si fue un error, puedes reservar de nuevo en la tienda.`
   };
   return {
-    asunto: `Tu reserva ${p.numero} está confirmada · retira hasta el ${limite}`,
+    asunto: `Pedido reservado ${p.numero} · retira hasta el ${limite}`,
     titulo: "¡Pedido reservado!",
-    parrafo: `Tu pedido <strong>${esc(p.numero)}</strong> está reservado. Retíralo y págalo en el local <strong>hasta el ${esc(limite)}</strong>; si no te acercas hasta esa fecha, la reserva se cancelará.`
+    parrafo: `Tu pedido <strong>${esc(p.numero)}</strong> está reservado. Muestra este correo o tu número de pedido en el local para retirarlo.`
   };
 }
 
+// Mismo contenido que la pantalla de confirmación de la tienda: resumen, retiro, fecha límite, pago y total
 function correoHTML(tipo: string, p: Pedido) {
   const t = textos(tipo, p);
   const local = p.locales;
-  const filas = p.pedido_items.map(i => `<tr>
-      <td style="padding:8px 0;border-bottom:1px solid #E6DBC8">${esc(i.nombre_producto)}${i.talla ? ` (talla ${esc(i.talla)})` : ""} × ${i.cantidad}</td>
-      <td style="padding:8px 0;border-bottom:1px solid #E6DBC8;text-align:right">${money(i.precio_unitario * i.cantidad)}</td></tr>`).join("");
+  const limite = fecha(p.fecha_limite);
+  const reservado = tipo === "reservado";
+  const fila = (k: string, v: string, extra = "") => `<tr>
+      <td style="padding:9px 0;color:#241812;vertical-align:top">${k}</td>
+      <td style="padding:9px 0;text-align:right;vertical-align:top">${v}${extra ? `<br><span style="font-size:13px;color:#6b5a4e">${extra}</span>` : ""}</td></tr>`;
+  const gorras = p.pedido_items.map(i => `<tr>
+      <td style="padding:7px 0;border-top:1px solid #E6DBC8;font-size:14px">${esc(i.nombre_producto)}${i.talla ? ` · talla ${esc(i.talla)}` : ""} × ${i.cantidad}</td>
+      <td style="padding:7px 0;border-top:1px solid #E6DBC8;font-size:14px;text-align:right">${money(i.precio_unitario * i.cantidad)}</td></tr>`).join("");
   const desc = Number(p.descuento) > 0
-    ? `<tr><td style="padding:4px 0;color:#2F6B4F">Descuento${p.codigos_descuento ? ` (${esc(p.codigos_descuento.codigo)}, ${p.codigos_descuento.porcentaje} %)` : ""}</td><td style="padding:4px 0;text-align:right;color:#2F6B4F">−${money(p.descuento)}</td></tr>` : "";
+    ? fila(`Descuento${p.codigos_descuento ? ` (${esc(p.codigos_descuento.codigo)})` : ""}`, `<span style="color:#2F6B4F">−${money(p.descuento)}</span>`) : "";
   return `<!doctype html><html lang="es"><body style="margin:0;background:#F3ECE0;font-family:Arial,Helvetica,sans-serif;color:#241812">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F3ECE0;padding:24px 12px"><tr><td align="center">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #B59F7E;border-radius:12px;overflow:hidden">
-      <tr><td style="background:#4A2E20;color:#E6DBC8;padding:18px 24px;font-size:20px;font-weight:bold">NQ Crown</td></tr>
-      <tr><td style="padding:24px">
-        <h1 style="margin:0 0 12px;font-size:24px;color:#4A2E20">${t.titulo}</h1>
-        <p style="margin:0 0 16px;font-size:15px;line-height:1.5">Hola, ${esc(p.nombre)}. ${t.parrafo}</p>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:15px">
-          ${filas}
-          <tr><td style="padding:8px 0 4px">Subtotal</td><td style="padding:8px 0 4px;text-align:right">${money(p.subtotal)}</td></tr>
-          ${desc}
-          <tr><td style="padding:10px 0;font-size:18px;font-weight:bold;border-top:2px solid #B59F7E">Total a pagar en el local</td>
-              <td style="padding:10px 0;font-size:18px;font-weight:bold;border-top:2px solid #B59F7E;text-align:right">${money(p.total)}</td></tr>
-        </table>
-        ${local ? `<p style="margin:16px 0 0;padding:12px 14px;background:#E6DBC8;border-left:5px solid #6B3FA0;border-radius:8px;font-size:14px;line-height:1.5">
-          <strong>Retiro:</strong> ${esc([local.nombre, local.direccion].filter(Boolean).join(" · "))}<br>${esc(local.horario)}<br>Pagas al retirar. Lleva tu número de pedido <strong>${esc(p.numero)}</strong>.</p>` : ""}
-        <p style="margin:24px 0 0"><a href="${TIENDA}#/pedidos" style="display:inline-block;background:#4A2E20;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:22px">Ver mis pedidos</a></p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
+      <tr><td style="background:#4A2E20;border-radius:12px 12px 0 0;padding:14px 24px">
+        <img src="${TIENDA}img/logo-nq-crown.png" alt="" width="32" height="32" style="vertical-align:middle;border-radius:6px">
+        <span style="vertical-align:middle;color:#E6DBC8;font-size:20px;font-weight:bold;margin-left:8px">NQ Crown</span></td></tr>
+      <tr><td style="padding:28px 24px 8px;text-align:center;background:#F3ECE0">
+        <div style="font-size:44px;line-height:1">${reservado ? "👑" : tipo === "retirado" ? "🧢" : "↩"}</div>
+        <h1 style="margin:12px 0 10px;font-family:Georgia,'Times New Roman',serif;font-size:30px;color:#4A2E20">${t.titulo}</h1>
+        <p style="margin:0 auto;max-width:460px;font-size:15px;line-height:1.55;color:#4a3a30">Hola, ${esc(p.nombre)}. ${t.parrafo}</p>
       </td></tr>
-      <tr><td style="background:#000000;color:#B59F7E;padding:14px 24px;font-size:12px">Recibiste este correo porque hiciste una reserva en NQ Crown.</td></tr>
+      <tr><td style="padding:18px 0 0">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1.5px solid #B59F7E;border-radius:14px">
+          <tr><td style="padding:22px 24px">
+            <h2 style="margin:0 0 8px;font-size:19px;color:#241812">Resumen</h2>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:15px">
+              ${fila("Número de pedido", `<strong>${esc(p.numero)}</strong>`)}
+              ${fila("A nombre de", esc(`${p.nombre} ${p.apellido}`))}
+              ${local ? fila("Retiro", esc(local.nombre), esc([local.direccion, local.horario].filter(Boolean).join(" · "))) : ""}
+              ${reservado ? fila("Retira hasta el", esc(limite)) : ""}
+              ${fila("Pago", "Al retirar, en el local")}
+            </table>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px">${gorras}</table>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:15px;margin-top:4px">
+              ${fila("Subtotal", money(p.subtotal))}
+              ${desc}
+              <tr><td style="padding:14px 0 0;border-top:2px solid #B59F7E;font-size:21px;font-weight:bold">Total a pagar</td>
+                  <td style="padding:14px 0 0;border-top:2px solid #B59F7E;font-size:21px;font-weight:bold;text-align:right">${money(p.total)}</td></tr>
+            </table>
+            ${reservado ? `<p style="margin:18px 0 0;padding:12px 14px;background:#E6DBC8;border-left:5px solid #6B3FA0;border-radius:8px;font-size:14px;line-height:1.5">
+              Lleva tu número de pedido <strong>${esc(p.numero)}</strong> al local. Si no te acercas hasta el ${esc(limite)}, tu reserva se cancelará.</p>` : ""}
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:22px 0;text-align:center">
+        <a href="${TIENDA}#/catalogo" style="display:inline-block;margin:4px;background:#4A2E20;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:22px">Seguir comprando</a>
+        <a href="${TIENDA}#/pedidos" style="display:inline-block;margin:4px;background:#ffffff;color:#4A2E20;border:1.5px solid #4A2E20;text-decoration:none;font-weight:bold;padding:11px 22px;border-radius:22px">Ver mis pedidos</a>
+      </td></tr>
+      <tr><td style="background:#000000;color:#B59F7E;padding:14px 24px;font-size:12px;border-radius:0 0 12px 12px">Recibiste este correo porque hiciste una reserva en NQ Crown con ${esc(p.correo)}.</td></tr>
     </table>
   </td></tr></table></body></html>`;
 }
 
 function correoTexto(tipo: string, p: Pedido) {
   const t = textos(tipo, p);
+  const l = p.locales;
   const items = p.pedido_items.map(i => `- ${i.nombre_producto}${i.talla ? ` (talla ${i.talla})` : ""} x ${i.cantidad}: ${money(i.precio_unitario * i.cantidad)}`).join("\n");
-  return `${t.titulo}\n\nHola, ${p.nombre}. ${t.parrafo.replace(/<[^>]+>/g, "")}\n\n${items}\nSubtotal: ${money(p.subtotal)}\n`
+  return `${t.titulo}\n\nHola, ${p.nombre}. ${t.parrafo.replace(/<[^>]+>/g, "")}\n\n`
+    + `Número de pedido: ${p.numero}\nA nombre de: ${p.nombre} ${p.apellido}\n`
+    + (l ? `Retiro: ${[l.nombre, l.direccion, l.horario].filter(Boolean).join(" · ")}\n` : "")
+    + (tipo === "reservado" ? `Retira hasta el: ${fecha(p.fecha_limite)}\n` : "")
+    + `Pago: al retirar, en el local\n\n${items}\nSubtotal: ${money(p.subtotal)}\n`
     + (Number(p.descuento) > 0 ? `Descuento: -${money(p.descuento)}\n` : "")
-    + `Total a pagar en el local: ${money(p.total)}\n\nVer mis pedidos: ${TIENDA}#/pedidos\n`;
+    + `Total a pagar: ${money(p.total)}\n\nVer mis pedidos: ${TIENDA}#/pedidos\n`;
 }
 
 const marcar = (id: number, estado: string, detalle: string | null = null) =>
@@ -96,7 +128,7 @@ Deno.serve(async req => {
   if (!n) return json({ ok: true, omitida: true });
 
   const { data: p, error } = await sb.from("pedidos")
-    .select("numero, nombre, subtotal, descuento, total, fecha_limite, codigos_descuento(codigo, porcentaje), locales(nombre, direccion, horario), pedido_items(nombre_producto, precio_unitario, cantidad, talla)")
+    .select("numero, nombre, apellido, correo, subtotal, descuento, total, fecha_limite, codigos_descuento(codigo, porcentaje), locales(nombre, direccion, horario), pedido_items(nombre_producto, precio_unitario, cantidad, talla)")
     .eq("id", n.pedido_id).single();
   if (error || !p) { await marcar(n.id, "error", "No se encontró el pedido"); return json({ error: "Pedido no encontrado" }, 404); }
 

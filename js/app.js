@@ -76,7 +76,7 @@
     if (!session) { state.user = null; state.favs = []; state.avisos = []; return; }
     const u = session.user;
     const [perfil, favs, cart, avisos] = await Promise.all([DB.perfil(u.id), DB.favoritos(), DB.carrito(), DB.misAvisos()]);
-    state.user = { id: u.id, email: u.email, nombre: perfil?.nombre || u.email.split("@")[0], apellido: perfil?.apellido || "", telefono: perfil?.telefono || "" };
+    state.user = { id: u.id, email: u.email, nombre: perfil?.nombre || u.email.split("@")[0], apellido: perfil?.apellido || "", telefono: perfil?.telefono || "", ofertas: !!perfil?.acepta_ofertas };
     state.favs = favs;
     state.avisos = avisos;
     const local = load("cart", {});
@@ -1210,6 +1210,8 @@
           </div>
           ${field("telefono", "Celular", { type: "tel", auto: "tel", value: u.telefono, hint: "Opcional. 10 números que empiezan con 09. Lo usamos para llenar tus reservas.", extra: 'inputmode="numeric" maxlength="12"' })}
           <div class="field"><span class="label" id="emailLabel">Correo electrónico</span><p class="readonly" aria-labelledby="emailLabel">${esc(u.email)}</p><span class="hint">Con este correo ingresas a tu cuenta.</span></div>
+          <div class="field"><label class="check"><input type="checkbox" name="ofertas" aria-describedby="h_ofertas" ${u.ofertas ? "checked" : ""}> Quiero recibir ofertas por correo</label>
+            <span class="hint" id="h_ofertas">Puedes quitarlo cuando quieras.</span></div>
           <button class="btn btn--cafe" id="profileBtn">Guardar cambios</button>
         </form>
         <form class="box" id="passForm" novalidate>
@@ -1242,8 +1244,8 @@
       const btn = $("#profileBtn");
       pf.dataset.busy = "1"; btn.disabled = true; btn.classList.add("is-loading"); btn.textContent = "Guardando…";
       try {
-        await DB.actualizarPerfil(u.id, { nombre: v.nombre, apellido: v.apellido, telefono: tel || null });
-        Object.assign(state.user, { nombre: v.nombre, apellido: v.apellido, telefono: tel });
+        await DB.actualizarPerfil(u.id, { nombre: v.nombre, apellido: v.apellido, telefono: tel || null, acepta_ofertas: pf.ofertas.checked });
+        Object.assign(state.user, { nombre: v.nombre, apellido: v.apellido, telefono: tel, ofertas: pf.ofertas.checked });
         updateHeader();
         toast("Guardamos tus datos");
       } catch (err) { dbError(err, "No pudimos guardar tus datos. Intenta de nuevo."); }
@@ -1326,7 +1328,7 @@
               </div>
               ${field("email", "Correo electrónico", { type: "email", ph: "correo@ejemplo.com", auto: "email", value: u.email, req: true, hint: "Te avisaremos aquí cuando tu pedido esté listo para retirar." })}
               ${field("telefono", "Celular", { type: "tel", auto: "tel", value: u.telefono, req: true, hint: "10 números que empiezan con 09. Ej.: 0991234567.", extra: 'inputmode="numeric" maxlength="12"' })}
-              <label class="check"><input type="checkbox" name="ofertas"> Quiero recibir ofertas por correo</label>
+              <label class="check"><input type="checkbox" name="ofertas" ${u.ofertas ? "checked" : ""}> Quiero recibir ofertas por correo</label>
             </fieldset>
             <fieldset class="box" data-step="1"><legend>Retiro y pago</legend>
               <div class="pickup">
@@ -1403,6 +1405,10 @@
           numero: r.numero, subtotal: Number(r.subtotal), descuento: Number(r.descuento), total: Number(r.total),
           codigo: state.coupon, fecha_limite: r.fecha_limite, cliente: `${v.nombre} ${v.apellido}`, email: v.email
         };
+        if (form.ofertas.checked !== !!state.user.ofertas) { // se guarda en el perfil; se cambia en «Mis datos»
+          state.user.ofertas = form.ofertas.checked;
+          DB.guardarOfertas(state.user.id, form.ofertas.checked).catch(e => console.error(e));
+        }
         if (state.user && !state.user.telefono) {
           state.user.telefono = tel;
           DB.guardarTelefono(state.user.id, tel).catch(e => console.error(e)); // para la próxima reserva
