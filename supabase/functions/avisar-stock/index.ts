@@ -3,7 +3,8 @@
 // y marca el aviso como enviado, así cada persona recibe un solo correo.
 // Usa los mismos secretos que notificar-pedido: GMAIL_USER y GMAIL_APP_PASSWORD.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+// nodemailer arma bien las cabeceras con tildes (denomailer partía el asunto y Gmail mostraba el correo roto)
+import nodemailer from "npm:nodemailer@6.9.16";
 
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TIENDA = "https://isaacquinga2006-sketch.github.io/NQCROWN/";
@@ -12,10 +13,6 @@ const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const money = (n: unknown) => "$" + Number(n).toFixed(2);
-// Asunto con tildes codificado en una sola línea (RFC 2047, base64). denomailer lo partía en
-// varias líneas y Gmail mostraba el correo roto, con las cabeceras y el HTML como texto.
-const asuntoMime = (s: string) => /^[ -~]*$/.test(s) ? s
-  : `=?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode(s)))}?=`;
 
 type Producto = { id: number; nombre: string; precio: number; stock: number; producto_imagenes: { url: string; orden: number }[] };
 
@@ -76,18 +73,17 @@ Deno.serve(async req => {
   if (!user || !pass) { await devolver(); return json({ error: "Correo no configurado" }, 500); }
 
   try {
-    const client = new SMTPClient({
-      connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: user, password: pass.replace(/\s/g, "") } }
+    const gmail = nodemailer.createTransport({
+      host: "smtp.gmail.com", port: 465, secure: true, auth: { user, pass: pass.replace(/\s/g, "") }
     });
     const nombre = perfil?.nombre || a.correo.split("@")[0];
-    await client.send({
+    await gmail.sendMail({
       from: `NQ Crown <${user}>`,
       to: a.correo,
-      subject: asuntoMime(textos(agotada, p as Producto).asunto),
-      content: `Hola, ${nombre}. ${textos(agotada, p as Producto).parrafo.replace(/<[^>]+>/g, "")} (${money(p.precio)})\nVer la gorra: ${TIENDA}#/producto/${p.id}\n`,
+      subject: textos(agotada, p as Producto).asunto,
+      text: `Hola, ${nombre}. ${textos(agotada, p as Producto).parrafo.replace(/<[^>]+>/g, "")} (${money(p.precio)})\nVer la gorra: ${TIENDA}#/producto/${p.id}\n`,
       html: correoHTML(nombre, p as Producto, agotada)
     });
-    await client.close();
     return json({ ok: true });
   } catch (e) {
     console.error(e);

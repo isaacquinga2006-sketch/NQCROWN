@@ -3,7 +3,8 @@
 // así nadie puede mandar correos con datos inventados, y cada notificación se envía una sola vez.
 // Secretos que hay que poner en Supabase (Edge Functions → Secrets): GMAIL_USER y GMAIL_APP_PASSWORD.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+// nodemailer arma bien las cabeceras con tildes (denomailer partía el asunto y Gmail mostraba el correo roto)
+import nodemailer from "npm:nodemailer@6.9.16";
 
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TIENDA = "https://isaacquinga2006-sketch.github.io/NQCROWN/";
@@ -12,10 +13,6 @@ const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const money = (n: unknown) => "$" + Number(n).toFixed(2);
-// Asunto con tildes codificado en una sola línea (RFC 2047, base64). denomailer lo partía en
-// varias líneas y Gmail mostraba el correo roto, con las cabeceras y el HTML como texto.
-const asuntoMime = (s: string) => /^[ -~]*$/.test(s) ? s
-  : `=?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode(s)))}?=`;
 const fecha = (iso: string) => new Date(iso + "T12:00:00Z")
   .toLocaleDateString("es-EC", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
 
@@ -143,17 +140,16 @@ Deno.serve(async req => {
   }
 
   try {
-    const client = new SMTPClient({
-      connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: user, password: pass.replace(/\s/g, "") } }
+    const gmail = nodemailer.createTransport({
+      host: "smtp.gmail.com", port: 465, secure: true, auth: { user, pass: pass.replace(/\s/g, "") }
     });
-    await client.send({
+    await gmail.sendMail({
       from: `NQ Crown <${user}>`,
       to: n.correo,
-      subject: asuntoMime(textos(n.tipo, p as Pedido).asunto),
-      content: correoTexto(n.tipo, p as Pedido),
+      subject: textos(n.tipo, p as Pedido).asunto,
+      text: correoTexto(n.tipo, p as Pedido),
       html: correoHTML(n.tipo, p as Pedido)
     });
-    await client.close();
     await marcar(n.id, "enviado");
     return json({ ok: true });
   } catch (e) {
