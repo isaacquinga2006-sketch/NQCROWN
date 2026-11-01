@@ -12,6 +12,10 @@ const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const money = (n: unknown) => "$" + Number(n).toFixed(2);
+// Asunto con tildes codificado en una sola línea (RFC 2047, base64). denomailer lo partía en
+// varias líneas y Gmail mostraba el correo roto, con las cabeceras y el HTML como texto.
+const asuntoMime = (s: string) => /^[ -~]*$/.test(s) ? s
+  : `=?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode(s)))}?=`;
 
 type Producto = { id: number; nombre: string; precio: number; stock: number; producto_imagenes: { url: string; orden: number }[] };
 
@@ -79,7 +83,7 @@ Deno.serve(async req => {
     await client.send({
       from: `NQ Crown <${user}>`,
       to: a.correo,
-      subject: textos(agotada, p as Producto).asunto,
+      subject: asuntoMime(textos(agotada, p as Producto).asunto),
       content: `Hola, ${nombre}. ${textos(agotada, p as Producto).parrafo.replace(/<[^>]+>/g, "")} (${money(p.precio)})\nVer la gorra: ${TIENDA}#/producto/${p.id}\n`,
       html: correoHTML(nombre, p as Producto, agotada)
     });
