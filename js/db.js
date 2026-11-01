@@ -76,6 +76,9 @@
         .order("id"));
       return rows.map(toProduct);
     },
+    async stock(id) { // unidades que quedan ahora mismo
+      return ok(await sb.from("productos").select("stock").eq("id", id).maybeSingle())?.stock ?? null;
+    },
     async tipos() { // [{ nombre, descripcion }] para el menú y la guía de modelos
       return ok(await sb.from("tipos").select("nombre, descripcion").order("id"));
     },

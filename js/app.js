@@ -57,6 +57,7 @@
     .filter(i => i.p && i.qty > 0);
   const inCartOf = id => cartItems().filter(i => i.p.id === id).reduce((n, i) => n + i.qty, 0);
   const tallaTexto = t => t ? ` · talla ${t}` : "";
+  const quedanTexto = n => `De esta gorra nos ${n === 1 ? "queda 1 unidad" : `quedan ${n} unidades`}`;
   // Todas las fotos de la gorra (las del catálogo de respaldo solo tienen una)
   const fotos = p => p.imgs?.length ? p.imgs : [{ url: p.img, alt: p.alt }];
   const cartCount = () => cartItems().reduce((n, i) => n + i.qty, 0);
@@ -140,7 +141,10 @@
   function addToCart(id, qty = 1, btn, talla = "") {
     const p = byId(id), key = DB.cartKey(id, talla);
     const before = state.cart[key] || 0;
-    state.cart[key] = Math.min(10, before + qty);
+    const tope = Math.max(0, Math.min(10, p.stock) - (inCartOf(p.id) - before)); // cuenta las otras tallas de la misma gorra
+    const ver = { label: "Ver carrito", run: () => go("#/carrito") };
+    if (before >= tope) return toastGorra(`Ya tienes en tu carrito todas las que nos quedan (${p.stock})`, p, talla, ver, "info");
+    state.cart[key] = Math.min(tope, before + qty);
     persist(); updateHeader(); syncItem(key);
     const bump = () => { const b = $("#cartBtn"); b.classList.remove("bump"); void b.offsetWidth; b.classList.add("bump"); };
     flyToCart(btn && (btn.closest(".card")?.querySelector(".card__img img") || $(".gallery__main img")), bump);
@@ -149,8 +153,7 @@
       btn.classList.add("is-done"); btn.innerHTML = `${ICON.check} Agregada`;
       setTimeout(() => { if (btn.isConnected) { btn.classList.remove("is-done"); btn.innerHTML = old; } }, 1400);
     }
-    const ver = { label: "Ver carrito", run: () => go("#/carrito") };
-    if (before + qty > 10) toastGorra("Máximo 10 unidades por gorra", p, talla, ver, "info");
+    if (before + qty > tope) toastGorra(`${quedanTexto(p.stock)}: agregamos ${plural(tope - before, "unidad", "unidades")}`, p, talla, ver, "info");
     else setTimeout(() => openDrawer(key, btn), reduceMotion.matches ? 0 : 560); // después de que la foto llega al carrito
   }
 
@@ -838,12 +841,12 @@
     let qty = 1, view = 0;
     const fav = state.favs.includes(p.id);
     const inCart = inCartOf(p.id);
-    const max = Math.min(10, p.stock);
+    let max = Math.min(10, p.stock);
     const gal = galleryOf(p);
     const tallas = p.talla ? TALLAS[p.talla] || [] : [];
     const related = PRODUCTS.filter(x => x.id !== p.id && x.stock && x.tipo === p.tipo)
       .concat(PRODUCTS.filter(x => x.id !== p.id && x.stock && x.tipo !== p.tipo)).slice(0, 4);
-    const qtyHint = () => `Máximo ${plural(max, "unidad", "unidades")} por gorra${p.stock <= 3 ? ` (quedan ${p.stock} en el local)` : ""}.${inCartOf(p.id) ? ` Ya tienes ${inCartOf(p.id)} en tu carrito.` : ""}`;
+    const qtyHint = () => `${quedanTexto(p.stock)}.${inCartOf(p.id) ? ` Ya tienes ${inCartOf(p.id)} en tu carrito.` : ""}`;
     const favBtn = `<button type="button" class="fav ${fav ? "on" : ""}" data-action="fav" data-id="${p.id}" aria-pressed="${fav}" aria-label="${esc(favLabel(p, fav))}" title="${fav ? "Quitar de favoritas" : "Guardar en favoritas"}">${ICON.heart}</button>`;
 
     const sizeHTML = tallas.length ? `<fieldset class="sizes field" data-f="talla" aria-describedby="h_talla m_talla">
@@ -940,6 +943,17 @@
         $("#galCount").textContent = `${view + 1} de ${gal.length}`;
       }
     };
+    // El stock se vuelve a leer de la base: otra persona pudo reservar desde que se abrió la tienda
+    DB.stock(p.id).then(actual => {
+      if (actual == null || actual === p.stock || parseHash().arg !== String(p.id)) return;
+      const antes = p.stock; p.stock = actual;
+      if (!actual || !antes) return viewProduct(r); // se agotó o volvió: cambia la pantalla
+      max = Math.min(10, actual); qty = Math.min(qty, max);
+      $("#dqty").textContent = qty;
+      const [minus, plus] = $$('[data-action="dqty"]');
+      minus.disabled = qty === 1; plus.disabled = qty >= max;
+      $("#qtyHint").textContent = qtyHint(); $("#qtyHint").classList.toggle("hint--low", actual <= 3);
+    }).catch(e => console.error(e));
     // Al elegir talla se quita el error
     $(".sizes")?.addEventListener("change", () => showErrors($(".info", app), {}, null));
     // Flechas ← → cambian de foto cuando el foco está en la galería
