@@ -1477,7 +1477,7 @@
   function viewConfirm(r) {
     const o = state.lastOrder;
     if (!o || o.numero !== r.arg) return viewNotFound();
-    mount(`<div class="wrap"><div class="done">
+    mount(`<div class="fondo-gorras"><div class="wrap"><div class="done">
       <svg class="crowncap" viewBox="0 0 220 170" aria-hidden="true" focusable="false">
         <ellipse cx="110" cy="156" rx="78" ry="8" fill="#E6DBC8"/>
         <g class="crowncap__cap">
@@ -1518,7 +1518,7 @@
         <a class="btn btn--cafe" href="#/catalogo">Seguir comprando</a>
         ${state.user ? `<a class="btn btn--borde" href="#/pedidos">Ver mis pedidos</a>` : ""}
       </div>
-    </div></div>`, "Pedido reservado");
+    </div></div></div>`, "Pedido reservado");
   }
 
   /* ---------- Mis pedidos (en la base, solo con sesión) ---------- */
