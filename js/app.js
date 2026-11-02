@@ -1339,7 +1339,7 @@
                 ${field("nombre", "Nombre", { auto: "given-name", value: u.nombre, req: true })}
                 ${field("apellido", "Apellido", { auto: "family-name", value: u.apellido, req: true, hint: "Lo pediremos al retirar el pedido." })}
               </div>
-              ${field("email", "Correo electrónico", { type: "email", ph: "correo@ejemplo.com", auto: "email", value: u.email, req: true, hint: "Te avisaremos aquí cuando tu pedido esté listo para retirar." })}
+              ${field("email", "Correo electrónico", { type: "email", ph: "correo@ejemplo.com", auto: "email", value: u.email, req: true, hint: "Aquí te enviaremos el resumen de tu reserva para que lo muestres en el local." })}
               ${field("telefono", "Celular", { type: "tel", auto: "tel", value: u.telefono, req: true, hint: "10 números que empiezan con 09. Ej.: 0991234567.", extra: 'inputmode="numeric" maxlength="12"' })}
               <label class="check"><input type="checkbox" name="ofertas" ${u.ofertas ? "checked" : ""}> Quiero recibir ofertas por correo</label>
             </fieldset>
@@ -1354,7 +1354,7 @@
                 </div>
               </div>
               <ul class="pickup__steps">
-                <li>Te enviamos un correo cuando tu pedido esté listo.</li>
+                <li>Te enviamos al correo el resumen de tu reserva.</li>
                 <li>Vas al local, das tu número de pedido y tu nombre.</li>
                 <li>Pagas ahí al retirar. No pagas nada en línea.</li>
               </ul>
@@ -1470,7 +1470,8 @@
         </g>
       </svg>
       <h1>¡Pedido reservado!</h1>
-      <p>Tu pedido <strong>${esc(o.numero)}</strong> está reservado. Te escribiremos a <strong>${esc(o.email)}</strong> cuando esté listo para retirar.</p>
+      <p>Tu pedido <strong>${esc(o.numero)}</strong> está reservado. Tienes 3 días para retirarlo: <strong>hasta el ${esc(limiteTexto(o.fecha_limite))}</strong>.</p>
+      <p>Te enviamos el resumen a <strong>${esc(o.email)}</strong>. Muéstralo en el local o da tu número de pedido para retirar y pagar.</p>
       <section class="panel" aria-labelledby="resTitle">
         <h2 id="resTitle">Resumen</h2>
         <dl class="sum">
@@ -1548,7 +1549,7 @@
         <dt>¿Puedo cancelar una reserva?</dt><dd>Sí. Ingresa a tu cuenta, abre «Mis pedidos» y presiona «Cancelar reserva».</dd>
       </dl>`],
     retiro: ["Retiro en el local", `<p>No hacemos envíos. Reservas en línea y retiras en <strong>${esc(localTexto())}</strong>.</p>
-      <ul><li><strong>Horario:</strong> ${esc(STORE.local.horario)}.</li><li>Te avisamos por correo cuando tu pedido está listo.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><strong>Formas de pago:</strong> ${esc(pagosTexto())}. No hay pagos en línea.</li><li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong></li></ul>`],
+      <ul><li><strong>Horario:</strong> ${esc(STORE.local.horario)}.</li><li>Al reservar te enviamos por correo el resumen de tu pedido.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><strong>Formas de pago:</strong> ${esc(pagosTexto())}. No hay pagos en línea.</li><li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong></li></ul>`],
     devoluciones: ["Devoluciones", "<p>Tienes 15 días desde que retiras tu pedido para devolverlo en el local. La gorra debe estar sin usar y con sus etiquetas.</p>"],
     contacto: ["Contacto", "<p>Correo: <strong>isaacquinga2006@gmail.com</strong></p><p>Horario: lunes a sábado, de 9:00 a 18:00.</p>"],
     accesibilidad: ["Accesibilidad", `<p>Queremos que todas las personas puedan comprar en NQ Crown.</p>
