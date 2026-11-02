@@ -30,6 +30,8 @@ base = io.open(RAIZ / "index.html", encoding="utf-8").read()
 for archivo, (titulo, desc) in PAGINAS.items():
     html = re.sub(r"<title>.*?</title>", f"<title>{titulo} · NQ Crown</title>", base, count=1)
     html = re.sub(r'<meta name="description" content="[^"]*">', f'<meta name="description" content="{desc}">', html, count=1)
+    # La página se identifica sola aunque se abra desde otra dirección (por ejemplo, dentro de WAVE)
+    html = html.replace('data-pagina="index"', f'data-pagina="{archivo}"', 1)
     html = html.replace("<!-- Página principal: bienvenida -->", f"<!-- Página: {titulo} (generada desde index.html) -->")
     io.open(RAIZ / f"{archivo}.html", "w", encoding="utf-8", newline="\n").write(html)
 print(f"{len(PAGINAS)} páginas generadas")

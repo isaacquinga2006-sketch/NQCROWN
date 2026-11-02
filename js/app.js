@@ -339,7 +339,9 @@
     return `${file}.html${q.toString() ? "?" + q : ""}`;
   }
   function parseHash() {
-    const file = (location.pathname.split("/").pop() || "index.html").replace(/\.html$/, "") || "index";
+    let file = (location.pathname.split("/").pop() || "index.html").replace(/\.html$/, "") || "index";
+    // Si la dirección no es de la tienda (p. ej. la abre WAVE desde su servidor), vale la que declara la página
+    if (!INFO_PAG.includes(file) && !Object.values(ARCHIVO).includes(file)) file = document.documentElement.dataset.pagina || file;
     const q = new URLSearchParams(location.search);
     if (INFO_PAG.includes(file)) return { name: "info", arg: file, q };
     const name = Object.keys(ARCHIVO).find(k => ARCHIVO[k] === file) || "no-encontrada";
