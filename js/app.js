@@ -1470,8 +1470,8 @@
         </g>
       </svg>
       <h1>¡Pedido reservado!</h1>
-      <p>Tu pedido <strong>${esc(o.numero)}</strong> ya está apartado para ti. Puedes retirarlo <strong>desde ahora y hasta el ${esc(limiteTexto(o.fecha_limite))}</strong>.</p>
-      <p>Te enviamos el resumen a <strong>${esc(o.email)}</strong>. Muéstralo en el local o da tu número de pedido para retirar y pagar.</p>
+      <p>Tu pedido <strong>${esc(o.numero)}</strong> ya está apartado para ti.</p>
+      <p>Revisa tu correo <strong>${esc(o.email)}</strong>: ahí está el resumen. Muéstralo en el local o da tu número de pedido <strong>hasta el ${esc(limiteTexto(o.fecha_limite))}</strong>.</p>
       <section class="panel" aria-labelledby="resTitle">
         <h2 id="resTitle">Resumen</h2>
         <dl class="sum">
