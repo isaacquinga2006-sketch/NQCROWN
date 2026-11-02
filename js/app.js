@@ -15,6 +15,14 @@
   const app = $("#app");
 
   /* ---------- Utilidades ---------- */
+  // Si una foto externa deja de existir, se muestra una gorra dibujada en vez del texto alternativo suelto
+  const FOTO_FALTA = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"%3E%3Crect width="200" height="200" fill="%23F3ECE0"/%3E%3Cg transform="translate(38 58) scale(1)" fill="none" stroke="%23B59F7E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"%3E%3Cpath d="M14 52C14 28 32 12 54 12s38 16 38 38"/%3E%3Cpath d="M14 52c22 5 52 4 78-2"/%3E%3Cpath d="M92 50c11 2 23 8 27 14-14 5-37 1-51-8"/%3E%3Cpath d="M54 13c-7 12-9 25-7 38"/%3E%3Cpath d="M54 13c10 10 15 22 16 37"/%3E%3Ccircle cx="54" cy="10" r="3"/%3E%3C/g%3E%3C/svg%3E';
+  document.addEventListener("error", e => {
+    const img = e.target;
+    if (img.tagName !== "IMG" || img.dataset.falta) return;
+    img.dataset.falta = "1"; img.src = FOTO_FALTA;
+  }, true);
+
   const money = n => "$" + n.toFixed(2);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmtDate = d => d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
