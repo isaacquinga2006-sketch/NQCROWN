@@ -34,7 +34,7 @@ const fotoURL = (url?: string) => !url ? "" : /^https?:\/\//.test(url) ? url : T
 function correoHTML(nombre: string, p: Producto, agotada: boolean) {
   const t = textos(agotada, p);
   const foto = fotoURL([...p.producto_imagenes].sort((a, b) => a.orden - b.orden)[0]?.url);
-  const enlace = `${TIENDA}#/producto/${p.id}`;
+  const enlace = `${TIENDA}producto.html?id=${p.id}`;
   return `<!doctype html><html lang="es"><body style="margin:0;background:#F3ECE0;font-family:Arial,Helvetica,sans-serif;color:#241812">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F3ECE0;padding:24px 12px"><tr><td align="center">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #B59F7E;border-radius:12px;overflow:hidden">
@@ -81,7 +81,7 @@ Deno.serve(async req => {
       from: `NQ Crown <${user}>`,
       to: a.correo,
       subject: textos(agotada, p as Producto).asunto,
-      text: `Hola, ${nombre}. ${textos(agotada, p as Producto).parrafo.replace(/<[^>]+>/g, "")} (${money(p.precio)})\nVer la gorra: ${TIENDA}#/producto/${p.id}\n`,
+      text: `Hola, ${nombre}. ${textos(agotada, p as Producto).parrafo.replace(/<[^>]+>/g, "")} (${money(p.precio)})\nVer la gorra: ${TIENDA}producto.html?id=${p.id}\n`,
       html: correoHTML(nombre, p as Producto, agotada)
     });
     return json({ ok: true });

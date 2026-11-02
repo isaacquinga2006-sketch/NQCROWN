@@ -117,6 +117,7 @@
   let toastTimer, toastAction = null, toastMs = 3000;
   const TOAST_ICON = { ok: "check", info: "alert", error: "alert" };
   function toast(msg, action, type = "ok", extra = {}) { // extra: { detalle, img }
+    ultimoAviso = action ? null : { msg, type, extra, t: Date.now() };
     const t = $("#toast");
     t.className = `toast toast--${type}`;
     t.setAttribute("role", type === "error" ? "alert" : "status");
@@ -239,7 +240,7 @@
     if (e.shiftKey && (document.activeElement === first || document.activeElement === $("#drawerTitle"))) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
-  window.addEventListener("hashchange", () => closeDrawer(false));
+  window.addEventListener("popstate", () => closeDrawer(false));
   // Una copia de la foto viaja hasta el carrito; sin foto o con «reducir movimiento» solo salta el carrito
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
   function flyToCart(img, done) {
@@ -279,7 +280,7 @@
     id = Number(id);
     const p = byId(id);
     if (!state.user) {
-      toast("Ingresa a tu cuenta para que te avisemos por correo", { label: "Ingresar", run: () => go("#/ingresar?next=" + encodeURIComponent(location.hash.replace(/^#\/?/, "") || "catalogo")) }, "info");
+      toast("Ingresa a tu cuenta para que te avisemos por correo", { label: "Ingresar", run: () => go("#/ingresar?next=" + encodeURIComponent(rutaActual())) }, "info");
       return;
     }
     const on = !state.avisos.includes(id);
@@ -299,7 +300,7 @@
   function toggleFav(id) {
     id = Number(id);
     if (!state.user) {
-      toast("Ingresa a tu cuenta para guardar favoritas", { label: "Ingresar", run: () => go("#/ingresar?next=" + encodeURIComponent(location.hash.replace(/^#\/?/, "") || "catalogo")) }, "info");
+      toast("Ingresa a tu cuenta para guardar favoritas", { label: "Ingresar", run: () => go("#/ingresar?next=" + encodeURIComponent(rutaActual())) }, "info");
       return null;
     }
     const on = !state.favs.includes(id);
@@ -318,18 +319,52 @@
   }
   const favLabel = (p, on) => on ? `Quitar ${p.nombre} de favoritas` : `Guardar ${p.nombre} en favoritas${state.user ? "" : " (necesitas ingresar)"}`;
 
-  /* ---------- Rutas ---------- */
-  // La portada sale cada vez que se abre el link principal (pestaña nueva). Dentro de la misma visita,
-  // el logo o «atrás» llevan al catálogo; los links directos (una gorra, un pedido) no pasan por la portada.
-  const portadaVista = () => { try { return sessionStorage.getItem("nqc_portada") === "1"; } catch { return false; } };
-  const marcarPortada = () => { try { sessionStorage.setItem("nqc_portada", "1"); } catch { /* sin almacenamiento */ } };
-  function parseHash() {
-    const raw = location.hash.replace(/^#\/?/, "");
-    const [path, qs = ""] = raw.split("?");
-    const parts = path.split("/").filter(Boolean);
-    return { name: parts[0] || (portadaVista() || DB.enlace.code ? "catalogo" : "bienvenida"), arg: parts[1], q: new URLSearchParams(qs) };
+  /* ---------- Rutas: cada pantalla es su propia página HTML ---------- */
+  // Dentro del código las rutas se escriben como antes («#/producto/31?x=1») y url() las convierte en
+  // el archivo de esa pantalla («producto.html?id=31&x=1»). Cada archivo carga este mismo JavaScript,
+  // que lee en qué página está (nombre del archivo + parámetros) y la dibuja.
+  const ARCHIVO = { bienvenida: "index", catalogo: "catalogo", producto: "producto", carrito: "carrito", ingresar: "ingresar",
+    checkout: "checkout", confirmacion: "confirmacion", pedidos: "pedidos", "nueva-clave": "nueva-clave", guia: "guia",
+    perfil: "perfil", salir: "salir" };
+  const INFO_PAG = ["ayuda", "retiro", "devoluciones", "contacto", "accesibilidad"];
+  const ARG = { producto: "id", confirmacion: "n" }; // el segundo tramo de la ruta va como parámetro
+  function url(h) {
+    const [path, qs = ""] = String(h).replace(/^#?\/?/, "").split("?");
+    const [name = "catalogo", arg] = path.split("/").filter(Boolean);
+    const q = new URLSearchParams(qs);
+    let file = ARCHIVO[name];
+    if (name === "info") file = INFO_PAG.includes(arg) ? arg : "ayuda";
+    if (!file) file = "catalogo";
+    if (arg && ARG[name]) { const rest = q.toString(); return `${file}.html?${ARG[name]}=${encodeURIComponent(arg)}${rest ? "&" + rest : ""}`; }
+    return `${file}.html${q.toString() ? "?" + q : ""}`;
   }
-  const go = h => { location.hash = h; };
+  function parseHash() {
+    const file = (location.pathname.split("/").pop() || "index.html").replace(/\.html$/, "") || "index";
+    const q = new URLSearchParams(location.search);
+    if (INFO_PAG.includes(file)) return { name: "info", arg: file, q };
+    const name = Object.keys(ARCHIVO).find(k => ARCHIVO[k] === file) || "no-encontrada";
+    const k = ARG[name], arg = k ? q.get(k) || undefined : undefined;
+    if (k) q.delete(k);
+    return { name, arg, q };
+  }
+  // La ruta actual escrita a la antigua, para «next=» (volver aquí después de ingresar)
+  const rutaActual = () => { const r = parseHash(); const qs = r.q.toString(); return (r.name === "info" ? "info/" + r.arg : r.name + (r.arg ? "/" + r.arg : "")) + (qs ? "?" + qs : ""); };
+  // Ir a otra pantalla: carga su página. Si solo cambian los filtros de la misma página (catálogo),
+  // se actualiza la dirección sin recargar. El aviso que se acaba de mostrar se pasa a la página nueva.
+  let ultimoAviso = null;
+  function go(h) {
+    const destino = new URL(url(h), location.href);
+    if (destino.pathname === location.pathname && parseHash().name === "catalogo") {
+      history.pushState(null, "", destino.pathname.split("/").pop() + destino.search); app.onclickDetail = null; render(); return;
+    }
+    if (ultimoAviso && Date.now() - ultimoAviso.t < 2500) { try { sessionStorage.setItem("nqc_aviso", JSON.stringify(ultimoAviso)); } catch { /* sin almacenamiento */ } }
+    location.href = destino.href;
+  }
+  window.addEventListener("popstate", () => { app.onclickDetail = null; if (ready) render(); });
+  // Cualquier enlace «#/…» que se dibuje en la página pasa a apuntar a su archivo .html
+  const enlazar = (root = document) => $$('a[href^="#/"]', root).forEach(a => a.setAttribute("href", url(a.getAttribute("href"))));
+  new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) { if (n.matches('a[href^="#/"]')) enlazar(n.parentNode); else enlazar(n); } })))
+    .observe(document.body, { childList: true, subtree: true });
 
   const routes = {
     bienvenida: viewWelcome,
@@ -407,7 +442,7 @@
   function mount(html, title) {
     app.innerHTML = html;
     // Entrada suave solo al cambiar de pantalla (no al filtrar o paginar); tarjetas en cascada
-    const page = location.hash.split("?")[0];
+    const page = location.pathname + (parseHash().arg || "");
     if (page !== lastPage) { lastPage = page; app.classList.remove("page-in"); void app.offsetWidth; app.classList.add("page-in"); }
     $$(".card", app).forEach((c, i) => c.style.setProperty("--i", Math.min(i, 12)));
     document.title = title ? `${title} · NQ Crown` : "NQ Crown · Gorras con carácter";
@@ -519,7 +554,6 @@
   // Sale al abrir el link principal: logo, frase, entrar a la tienda u ofertas, y tres datos de la tienda.
   const LIGAS_PORTADA = [["mlb", "MLB"], ["nba", "NBA"], ["nfl", "NFL"], ["f1", "Fórmula 1"]];
   function viewWelcome() {
-    marcarPortada();
     const nOferta = PRODUCTS.filter(p => p.antes).length;
     mount(`<section class="welcome" aria-labelledby="wTitle">
       <div class="welcome__in">
@@ -808,7 +842,7 @@
     });
     const h = "#/catalogo" + (q.toString() ? "?" + q : "");
     if (replace && r.name === "catalogo") {
-      history.replaceState(null, "", h); render();
+      history.replaceState(null, "", url(h)); render();
       announce($("#results")?.textContent || "No encontramos gorras con esos filtros");
     } else go(h);
   }
@@ -1736,7 +1770,7 @@
   sList.addEventListener("mousedown", e => e.preventDefault()); // el foco se queda en el buscador
   sList.addEventListener("click", e => pickSug(e.target.closest(".sug__opt")));
   $("#searchForm").addEventListener("focusout", e => { if (!$("#searchForm").contains(e.relatedTarget)) closeSug(); });
-  window.addEventListener("hashchange", closeSug);
+  window.addEventListener("popstate", closeSug);
 
   $("#searchForm").addEventListener("submit", e => { e.preventDefault(); closeSug(); setCatalogQuery({ q: sInput.value.trim(), f: "all", p: 1 }); });
   sInput.addEventListener("input", e => {
@@ -1753,7 +1787,6 @@
   });
 
   let ready = false; // no pintar pantallas hasta tener el catálogo de la base
-  window.addEventListener("hashchange", () => { app.onclickDetail = null; if (ready) render(); });
   // Carrito sin sesión al día entre pestañas (con sesión vive en la base)
   window.addEventListener("storage", e => {
     if (e.key === "nqc_cart" && !state.user) { state.cart = load("cart", {}); render(); }
@@ -1780,33 +1813,44 @@
     }
     ready = true;
     buildMega();
-    // Vuelta desde Google: ir a donde estaba (p. ej. la reserva) y saludar, o avisar si Google falló
+    // Vuelta desde Google, desde el enlace de confirmación o desde «olvidé mi contraseña»: Supabase vuelve
+    // siempre a la página principal con ?code=…; desde aquí se va a la página que corresponde.
     let next = null;
     try { next = sessionStorage.getItem("nqc_next"); sessionStorage.removeItem("nqc_next"); } catch { /* sin almacenamiento */ }
     const oauthError = DB.enlace.error;
-    // Vuelta desde el enlace de confirmación del correo: no viene de Google ni del cambio de contraseña,
-    // y si abrió sesión, la confirmación es de hace pocos minutos
-    const sesion = state.user ? await DB.sesion() : null;
-    const recien = !sesion || Date.now() - new Date(sesion.user.email_confirmed_at || 0) < 15 * 60 * 1000;
-    const confirmo = !next && parseHash().name !== "nueva-clave" && recien && (DB.enlace.code || oauthError);
-    if (oauthError || next || DB.enlace.code) {
-      const hash = next && state.user ? "#/" + next : confirmo && !state.user && !oauthError ? "#/ingresar" : location.hash;
-      history.replaceState(null, "", location.pathname + hash);
+    if (DB.enlace.code || oauthError) {
+      await new Promise(r => setTimeout(r, 0)); // deja llegar el aviso PASSWORD_RECOVERY
+      if (recuperando) return go("#/nueva-clave");
+      // Confirmación del correo: no viene de Google y, si abrió sesión, la confirmación es de hace pocos minutos
+      const sesion = state.user ? await DB.sesion() : null;
+      const recien = !sesion || Date.now() - new Date(sesion.user.email_confirmed_at || 0) < 15 * 60 * 1000;
+      const confirmo = !next && recien;
+      if (confirmo && oauthError) toast("El enlace de confirmación ya venció o ya se usó. Ingresa, y si hace falta te reenviamos otro.", null, "error");
+      else if (confirmo && state.user) toast(`¡Correo confirmado! Bienvenido, ${state.user.nombre.split(" ")[0]}.`);
+      else if (confirmo) toast("¡Correo confirmado! Ahora ingresa con tu correo y contraseña.");
+      else if (oauthError) toast("No pudimos ingresar con Google. Intenta de nuevo o usa tu correo y contraseña.", null, "error");
+      else if (next && state.user) toast(`Hola, ${state.user.nombre.split(" ")[0]}. Ingresaste con Google.`);
+      return go(next && state.user ? "#/" + next : confirmo && !state.user ? "#/ingresar" : "#/catalogo");
     }
+    // Aviso que venía de la página anterior (p. ej. «Cerraste sesión»). Se lee antes de dibujar,
+    // porque la pantalla puede mandar a otra página y dejar su propio aviso para la siguiente.
+    let av = null;
+    try { av = JSON.parse(sessionStorage.getItem("nqc_aviso") || "null"); sessionStorage.removeItem("nqc_aviso"); } catch { /* sin almacenamiento */ }
     render();
-    if (confirmo && oauthError) toast("El enlace de confirmación ya venció o ya se usó. Ingresa, y si hace falta te reenviamos otro.", null, "error");
-    else if (confirmo && state.user) toast(`¡Correo confirmado! Bienvenido, ${state.user.nombre.split(" ")[0]}.`);
-    else if (confirmo) toast("¡Correo confirmado! Ahora ingresa con tu correo y contraseña.");
-    else if (oauthError) toast("No pudimos ingresar con Google. Intenta de nuevo o usa tu correo y contraseña.", null, "error");
-    else if (next && state.user) toast(`Hola, ${state.user.nombre.split(" ")[0]}. Ingresaste con Google.`);
+    if (av && Date.now() - av.t < 15000) toast(av.msg, null, av.type, av.extra);
   }
 
   // Avisos de Supabase Auth: sesión cerrada en otra pestaña o enlace para cambiar la contraseña.
   // Se usa setTimeout para no llamar a la base dentro del aviso (Supabase lo recomienda).
   DB.sb.auth.onAuthStateChange((event, session) => setTimeout(async () => {
     if (event === "SIGNED_OUT" && state.user) { state.user = null; state.favs = []; state.cart = {}; persist(); if (ready) render(); }
-    if (event === "PASSWORD_RECOVERY") { try { await loadUser(session); } catch (e) { console.error(e); } go("#/nueva-clave"); }
   }, 0));
+  // El enlace del correo «olvidé mi contraseña» abre la página principal: se marca para ir a «nueva contraseña»
+  let recuperando = false;
+  DB.sb.auth.onAuthStateChange(event => { if (event === "PASSWORD_RECOVERY") recuperando = true; });
 
-  init();
+  // Enlaces viejos con «#/…» (correos ya enviados, favoritos guardados): se abren en su página nueva
+  if (location.hash.startsWith("#/")) location.replace(url(location.hash));
+  else init();
+
 })();

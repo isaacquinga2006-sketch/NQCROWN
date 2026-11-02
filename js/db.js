@@ -11,6 +11,10 @@
   const urlInicial = new URLSearchParams(location.search);
   const enlace = { code: urlInicial.has("code"), error: urlInicial.get("error_description") };
 
+  // Supabase siempre vuelve a la página principal de la tienda (la dirección autorizada en Supabase);
+  // desde ahí app.js lleva a la página que corresponde (ingresar, nueva contraseña o donde estaba).
+  const RAIZ = new window.URL("./", location.href).href.split(/[?#]/)[0];
+
   const sb = window.supabase.createClient(URL, KEY, {
     auth: { flowType: "pkce", persistSession: true, detectSessionInUrl: true }
   });
@@ -104,12 +108,12 @@
     async crearCuenta(email, password, nombre, apellido) {
       return ok(await sb.auth.signUp({
         email, password,
-        options: { data: { nombre, apellido }, emailRedirectTo: location.origin + location.pathname }
+        options: { data: { nombre, apellido }, emailRedirectTo: RAIZ }
       }));
     },
     // Vuelve a mandar el correo para confirmar la cuenta
     async reenviarConfirmacion(email) {
-      ok(await sb.auth.resend({ type: "signup", email, options: { emailRedirectTo: location.origin + location.pathname } }));
+      ok(await sb.auth.resend({ type: "signup", email, options: { emailRedirectTo: RAIZ } }));
     },
     // Lleva a la pantalla de Google y vuelve a la tienda con la sesión iniciada
     async ingresarConGoogle() {
@@ -118,14 +122,14 @@
       if (!ajustes?.external?.google) throw new Error("provider is not enabled");
       ok(await sb.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: "select_account" } }
+        options: { redirectTo: RAIZ, queryParams: { prompt: "select_account" } }
       }));
     },
     async salir() {
       ok(await sb.auth.signOut());
     },
     async recuperarClave(email) {
-      ok(await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }));
+      ok(await sb.auth.resetPasswordForEmail(email, { redirectTo: RAIZ }));
     },
     async cambiarClave(password) {
       ok(await sb.auth.updateUser({ password }));

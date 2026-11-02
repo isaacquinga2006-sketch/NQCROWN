@@ -93,8 +93,8 @@ function correoHTML(tipo: string, p: Pedido) {
         </table>
       </td></tr>
       <tr><td style="padding:22px 0;text-align:center">
-        <a href="${TIENDA}#/catalogo" style="display:inline-block;margin:4px;background:#4A2E20;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:22px">Seguir comprando</a>
-        <a href="${TIENDA}#/pedidos" style="display:inline-block;margin:4px;background:#ffffff;color:#4A2E20;border:1.5px solid #4A2E20;text-decoration:none;font-weight:bold;padding:11px 22px;border-radius:22px">Ver mis pedidos</a>
+        <a href="${TIENDA}catalogo.html" style="display:inline-block;margin:4px;background:#4A2E20;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:22px">Seguir comprando</a>
+        <a href="${TIENDA}pedidos.html" style="display:inline-block;margin:4px;background:#ffffff;color:#4A2E20;border:1.5px solid #4A2E20;text-decoration:none;font-weight:bold;padding:11px 22px;border-radius:22px">Ver mis pedidos</a>
       </td></tr>
       <tr><td style="background:#000000;color:#B59F7E;padding:14px 24px;font-size:12px;border-radius:0 0 12px 12px">Recibiste este correo porque hiciste una reserva en NQ Crown con ${esc(p.correo)}.</td></tr>
     </table>
@@ -111,7 +111,7 @@ function correoTexto(tipo: string, p: Pedido) {
     + (tipo === "reservado" ? `Retira hasta el: ${fecha(p.fecha_limite)}\n` : "")
     + `Pago: al retirar, en el local${l?.metodos_pago?.length ? ` (${l.metodos_pago.join(", ")})` : ""}\n\n${items}\nSubtotal: ${money(p.subtotal)}\n`
     + (Number(p.descuento) > 0 ? `Descuento: -${money(p.descuento)}\n` : "")
-    + `Total a pagar: ${money(p.total)}\n\nVer mis pedidos: ${TIENDA}#/pedidos\n`;
+    + `Total a pagar: ${money(p.total)}\n\nVer mis pedidos: ${TIENDA}pedidos.html\n`;
 }
 
 const marcar = (id: number, estado: string, detalle: string | null = null) =>
