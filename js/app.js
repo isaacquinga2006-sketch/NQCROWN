@@ -1355,7 +1355,7 @@
               </div>
               <ul class="pickup__steps">
                 <li>Te enviamos al correo el resumen de tu reserva.</li>
-                <li>Vas al local, das tu número de pedido y tu nombre.</li>
+                <li>Puedes retirarlo desde que reservas: vas al local y das tu número de pedido y tu nombre.</li>
                 <li>Pagas ahí al retirar. No pagas nada en línea.</li>
               </ul>
               <p class="paylist__title">Formas de pago en el local</p>
@@ -1470,7 +1470,7 @@
         </g>
       </svg>
       <h1>¡Pedido reservado!</h1>
-      <p>Tu pedido <strong>${esc(o.numero)}</strong> está reservado. Tienes 3 días para retirarlo: <strong>hasta el ${esc(limiteTexto(o.fecha_limite))}</strong>.</p>
+      <p>Tu pedido <strong>${esc(o.numero)}</strong> ya está apartado para ti. Puedes retirarlo <strong>desde ahora y hasta el ${esc(limiteTexto(o.fecha_limite))}</strong>.</p>
       <p>Te enviamos el resumen a <strong>${esc(o.email)}</strong>. Muéstralo en el local o da tu número de pedido para retirar y pagar.</p>
       <section class="panel" aria-labelledby="resTitle">
         <h2 id="resTitle">Resumen</h2>
@@ -1549,7 +1549,7 @@
         <dt>¿Puedo cancelar una reserva?</dt><dd>Sí. Ingresa a tu cuenta, abre «Mis pedidos» y presiona «Cancelar reserva».</dd>
       </dl>`],
     retiro: ["Retiro en el local", `<p>No hacemos envíos. Reservas en línea y retiras en <strong>${esc(localTexto())}</strong>.</p>
-      <ul><li><strong>Horario:</strong> ${esc(STORE.local.horario)}.</li><li>Al reservar te enviamos por correo el resumen de tu pedido.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><strong>Formas de pago:</strong> ${esc(pagosTexto())}. No hay pagos en línea.</li><li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong></li></ul>`],
+      <ul><li><strong>Horario:</strong> ${esc(STORE.local.horario)}.</li><li>Al reservar te enviamos por correo el resumen de tu pedido. Puedes retirarlo desde ese momento.</li><li>Al retirar, das tu número de pedido y tu nombre, y pagas ahí.</li><li><strong>Formas de pago:</strong> ${esc(pagosTexto())}. No hay pagos en línea.</li><li><strong>Si no te acercas en máximo 3 días después de tu reservación, se cancelará.</strong></li></ul>`],
     devoluciones: ["Devoluciones", "<p>Tienes 15 días desde que retiras tu pedido para devolverlo en el local. La gorra debe estar sin usar y con sus etiquetas.</p>"],
     contacto: ["Contacto", "<p>Correo: <strong>isaacquinga2006@gmail.com</strong></p><p>Horario: lunes a sábado, de 9:00 a 18:00.</p>"],
     accesibilidad: ["Accesibilidad", `<p>Queremos que todas las personas puedan comprar en NQ Crown.</p>

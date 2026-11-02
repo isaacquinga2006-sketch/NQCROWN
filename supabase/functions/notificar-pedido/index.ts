@@ -40,7 +40,7 @@ function textos(tipo: string, p: Pedido) {
   return {
     asunto: `Pedido reservado ${p.numero} · retira hasta el ${limite}`,
     titulo: "¡Pedido reservado!",
-    parrafo: `Tu pedido <strong>${esc(p.numero)}</strong> está reservado. Muestra este correo o tu número de pedido en el local para retirarlo.`
+    parrafo: `Tu pedido <strong>${esc(p.numero)}</strong> ya está apartado para ti. Puedes retirarlo desde ahora y hasta el <strong>${esc(limite)}</strong>: muestra este correo o da tu número de pedido en el local.`
   };
 }
 
