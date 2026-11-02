@@ -410,6 +410,35 @@
     else app.focus({ preventScroll: true });
   }
 
+  /* ---------- Ventana de confirmación (reemplaza a confirm() del navegador) ---------- */
+  // Botones que dicen lo que hacen («Sí, cancelar reserva» / «No, mantenerla»), el foco empieza en la opción
+  // segura y «Esc» o clic afuera = no. <dialog> mantiene el foco adentro y lo devuelve al botón que la abrió.
+  function confirmar({ titulo, texto, detalle = "", si, no = "No, volver", peligro = true }) {
+    return new Promise(resolve => {
+      const d = document.createElement("dialog");
+      d.className = "confirm";
+      d.setAttribute("aria-labelledby", "confirmTitle");
+      d.setAttribute("aria-describedby", "confirmText");
+      d.innerHTML = `<span class="confirm__icon" aria-hidden="true">${ICON.alert}</span>
+        <h2 id="confirmTitle">${esc(titulo)}</h2>
+        <p id="confirmText">${esc(texto)}</p>${detalle}
+        <div class="confirm__actions">
+          <button type="button" class="btn btn--borde" value="no">${esc(no)}</button>
+          <button type="button" class="btn ${peligro ? "btn--rojo" : "btn--cafe"}" value="si">${esc(si)}</button>
+        </div>`;
+      const cerrar = ok => { d.close(); d.remove(); resolve(ok); };
+      d.addEventListener("click", e => {
+        const b = e.target.closest("button[value]");
+        if (b) return cerrar(b.value === "si");
+        if (e.target === d) cerrar(false); // clic en el fondo oscuro
+      });
+      d.addEventListener("cancel", e => { e.preventDefault(); cerrar(false); }); // tecla Esc
+      document.body.append(d);
+      d.showModal();
+      $('button[value="no"]', d).focus();
+    });
+  }
+
   /* ---------- Piezas reutilizables ---------- */
   const pctOff = p => Math.round((1 - p.precio / p.antes) * 100);
   const priceHTML = p => p.antes
@@ -960,9 +989,9 @@
       } else if (action.dataset.action === "step") {
         $(`.thumb[data-v="${(view + Number(action.dataset.d) + gal.length) % gal.length}"]`).click();
       } else if (action.dataset.action === "delReview") {
-        if (!confirm("¿Borrar tu reseña de esta gorra?")) return;
-        DB.borrarResena(Number(action.dataset.rid))
-          .then(() => { toast("Borraste tu reseña"); loadReviews(p, true); })
+        confirmar({ titulo: "¿Borrar tu reseña?", texto: `Se borrará tu reseña de ${p.nombre}. Podrás escribir otra cuando quieras.`, si: "Sí, borrar reseña", no: "No, mantenerla" })
+          .then(ok => ok && DB.borrarResena(Number(action.dataset.rid))
+            .then(() => { toast("Borraste tu reseña"); loadReviews(p, true); }))
           .catch(e => dbError(e, "No pudimos borrar tu reseña. Intenta de nuevo."));
       } else if (action.dataset.action === "view") {
         view = Number(action.dataset.v);
@@ -1529,9 +1558,19 @@
 
     app.onclickDetail = async a => {
       if (a.dataset.action !== "cancelOrder") return;
-      if (!confirm(`¿Cancelar la reserva ${a.dataset.num}? Las gorras vuelven a estar disponibles para otras personas.`)) return;
+      const o = list.find(x => x.id === Number(a.dataset.oid));
+      const ok = await confirmar({
+        titulo: `¿Cancelar la reserva ${a.dataset.num}?`,
+        texto: "Las gorras dejarán de estar apartadas para ti y volverán a la tienda. Esto no se puede deshacer.",
+        detalle: o ? `<ul class="confirm__items">${o.pedido_items.map(i => { const p = byId(i.producto_id);
+            return `<li>${p ? `<img src="${p.img}" alt="">` : ""}<span>${esc(i.nombre_producto)}${i.talla ? ` · talla ${esc(i.talla)}` : ""} × ${i.cantidad}</span></li>`; }).join("")}</ul>
+          <p class="confirm__total">Total de la reserva: <strong>${money(Number(o.total))}</strong></p>
+          <p class="hint">Te enviaremos un correo confirmando la cancelación.</p>` : "",
+        si: "Sí, cancelar reserva", no: "No, mantener reserva"
+      });
+      if (!ok) return;
       a.disabled = true; a.textContent = "Cancelando…";
-      try { await DB.cancelarReserva(Number(a.dataset.oid)); toast(`Cancelaste la reserva ${a.dataset.num}`); viewOrders(); }
+      try { await DB.cancelarReserva(Number(a.dataset.oid)); toast(`Cancelaste la reserva ${a.dataset.num}`, null, "ok", { detalle: "Las gorras volvieron a la tienda y te enviamos un correo de confirmación." }); viewOrders(); }
       catch (e) { a.disabled = false; a.textContent = "Cancelar reserva"; dbError(e, "No pudimos cancelar la reserva. Intenta de nuevo."); }
     };
   }
